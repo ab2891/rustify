@@ -1,7 +1,7 @@
 //! Tauri commands and app startup. To add a feature: write a `#[tauri::command]`
 //! here (or in a new module) and register it in `run()`'s `generate_handler!`.
 use crate::{
-    credentials,
+    credentials, island,
     library::{load_library, save_library, Library, Track},
     native_player, shuffle, spotify,
 };
@@ -145,6 +145,16 @@ async fn spotify_player_stop(player: State<'_, native_player::NativePlayer>) -> 
     player.stop().await;
     Ok(())
 }
+/// Shows or hides the floating island; returns whether it is now open.
+// Must be async: creating a window from a sync command deadlocks on Windows.
+#[tauri::command]
+async fn island_toggle(app: tauri::AppHandle) -> Result<bool, String> {
+    island::toggle(&app, root(&app)?)
+}
+#[tauri::command]
+async fn island_show_main(app: tauri::AppHandle) -> Result<(), String> {
+    island::show_main(&app)
+}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -158,6 +168,14 @@ pub fn run() {
             )));
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // The island mirrors the main window; close it with the app.
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(island) = window.app_handle().get_webview_window(island::LABEL) {
+                    let _ = island.close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_library,
             shuffle_tracks,
@@ -169,7 +187,9 @@ pub fn run() {
             spotify_disconnect,
             spotify_player_start,
             spotify_player_status,
-            spotify_player_stop
+            spotify_player_stop,
+            island_toggle,
+            island_show_main
         ])
         .build(tauri::generate_context!())
         .expect("Could not launch desktop app")

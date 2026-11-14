@@ -161,7 +161,8 @@ test("browser sign-in clearly reports native requirement and dialog traps focus"
     .getByRole("button", { name: "Connect to Spotify", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toContainText("Tauri desktop app");
-  await page.getByRole("button", { name: "Close dialog", exact: true }).focus();
+  // The dialog focuses its first control on a timer; let that settle first.
+  await expect(page.getByRole("button", { name: "Close dialog", exact: true })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(
     page.getByRole("button", { name: "Continue to Spotify", exact: true }),
@@ -248,6 +249,9 @@ async function fakeSpotify(page, restore = false, options = {}) {
       window.__TAURI_INTERNALS__ = {
         invoke: async (command, args) => {
           window.calls.push({ command, args });
+          if (command === "island_toggle") return (window.islandOpen = !window.islandOpen);
+          if (command === "plugin:event|listen") { (window.eventHandlers ||= {})[args.event] = args.handler; return args.handler; }
+          if (command === "plugin:event|emit_to") { (window.emitted ||= []).push(args); return null; }
           if (command === "spotify_player_start") { window.playerStarted = true; return "rustify-player"; }
           if (command === "spotify_player_status") return { device_id: window.playerStarted ? "rustify-player" : null, starting: false, error: null };
           if (command === "spotify_player_stop") { window.playerStarted = false; return null; }
@@ -477,7 +481,14 @@ async function fakeSpotify(page, restore = false, options = {}) {
           }
         },
         convertFileSrc: (path) => path,
+        transformCallback: (callback) => {
+          const id = (window.nextCallback = (window.nextCallback || 0) + 1);
+          (window.callbacks ||= {})[id] = callback;
+          return id;
+        },
       };
+      // Delivers a Tauri event to the app, as the island window would.
+      window.fireEvent = (event, payload) => window.callbacks[window.eventHandlers[event]]({ event, id: 1, payload });
       localStorage.setItem("rustify-mode", "spotify");
     },
     { demo, restore, options },
@@ -1106,4 +1117,19 @@ test("closing the previous Spotify app recovers from its stale device", async ({
   await expect(page.locator(".current-track strong")).toHaveText("Remote song");
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.selectedDevice)).toBe("rustify-player");
+});
+
+test("island opens from the player bar, mirrors playback and sends commands", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.command === "island_toggle"))).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  const state = await page.evaluate(() => window.emitted.find((e) => e.event === "island-state")?.payload);
+  expect(state).toMatchObject({ source: "spotify", playing: expect.any(Boolean) });
+  expect(await page.evaluate(() => window.emitted.find((e) => e.event === "island-state").target)).toMatchObject({ label: "island" });
+  await page.evaluate(() => window.fireEvent("island-command", "next"));
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/next")))).toBe(true);
+  await page.keyboard.press("Alt+I");
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "island_toggle").length)).toBe(2);
 });

@@ -6,6 +6,7 @@ import { sameRecording } from "./playback-match.js";
 import { Queue, formatTime, escapeHTML as h } from "./player.js";
 import { loadFeatures } from "./features/registry.js";
 import featureList from "./features/index.js";
+let features = null; // set once the app context exists (see featureContext)
 import {
   native,
   shuffleTracks,
@@ -613,11 +614,24 @@ function renderPlayer() {
     : queue.repeat;
   const shuffle = trueShuffle;
   document.querySelector(".player").innerHTML =
-    `<div class="current-track">${current ? `${cover(current.cover, current.album)}<button class="text" data-action="now-panel"><strong>${h(current.title)}</strong><small>${h(current.artist)}</small></button><button class="icon-button ${liked(current.id) ? "active" : ""}" data-like="${h(current.id)}" aria-label="${liked(current.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(current.id) ? "check" : "plus")}</button>` : '<span class="muted" style="font-size:12px">Choose something to play</span>'}</div><div class="transport"><div class="transport-buttons">${ib("shuffle", "True shuffle", "shuffle", "", shuffle)}${ib("previous", "Previous track", "previous")}${ib(playing ? "pause" : "play", playing ? "Pause" : "Play", "play", "main-play")}${ib("next", "Next track", "next")}${ib("repeat", `Repeat: ${repeat}`, "repeat", "", repeat !== "off")}${repeat === "one" ? '<span style="position:absolute;font-size:9px;margin-left:210px;margin-top:-4px;pointer-events:none">1</span>' : ""}</div><div class="timeline"><span id="elapsed">${formatTime(elapsed)}</span><input id="seek" type="range" min="0" max="${Math.max(1, duration)}" step=".1" value="${elapsed}" aria-label="Seek playback" style="--pct:${duration ? (elapsed / duration) * 100 : 0}%"><span id="duration">${formatTime(duration)}</span></div></div><div class="player-extras">${ib("queue", "Show queue", "queue", "", panel === "queue")}${ib("device", "Connect to a device", "devices", "device-button", Boolean(isSpotify() && remote.state?.device))}<div class="volume-controls" style="display:flex;align-items:center">${ib(muted ? "muted" : "volume", muted ? "Unmute" : "Mute", "mute")}<input id="volume" ${isSpotify() && remote.state?.device?.supports_volume === false ? "disabled" : ""} type="range" min="0" max="100" value="${muted ? 0 : Math.round(audio.volume * 100)}" aria-label="Volume" style="--pct:${muted ? 0 : audio.volume * 100}%"></div>${ib("expand", "Toggle now playing", "now-panel", "expand-btn", panel === "now")}</div>`;
+    `<div class="current-track">${current ? `${cover(current.cover, current.album)}<button class="text" data-action="now-panel"><strong>${h(current.title)}</strong><small>${h(current.artist)}</small></button><button class="icon-button ${liked(current.id) ? "active" : ""}" data-like="${h(current.id)}" aria-label="${liked(current.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(current.id) ? "check" : "plus")}</button>` : '<span class="muted" style="font-size:12px">Choose something to play</span>'}</div><div class="transport"><div class="transport-buttons">${ib("shuffle", "True shuffle", "shuffle", "", shuffle)}${ib("previous", "Previous track", "previous")}${ib(playing ? "pause" : "play", playing ? "Pause" : "Play", "play", "main-play")}${ib("next", "Next track", "next")}${ib("repeat", `Repeat: ${repeat}`, "repeat", "", repeat !== "off")}${repeat === "one" ? '<span style="position:absolute;font-size:9px;margin-left:210px;margin-top:-4px;pointer-events:none">1</span>' : ""}</div><div class="timeline"><span id="elapsed">${formatTime(elapsed)}</span><input id="seek" type="range" min="0" max="${Math.max(1, duration)}" step=".1" value="${elapsed}" aria-label="Seek playback" style="--pct:${duration ? (elapsed / duration) * 100 : 0}%"><span id="duration">${formatTime(duration)}</span></div></div><div class="player-extras">${ib("queue", "Show queue", "queue", "", panel === "queue")}${ib("device", "Connect to a device", "devices", "device-button", Boolean(isSpotify() && remote.state?.device))}${native ? ib("island", "Toggle floating island", "island", "island-button") : ""}<div class="volume-controls" style="display:flex;align-items:center">${ib(muted ? "muted" : "volume", muted ? "Unmute" : "Mute", "mute")}<input id="volume" ${isSpotify() && remote.state?.device?.supports_volume === false ? "disabled" : ""} type="range" min="0" max="100" value="${muted ? 0 : Math.round(audio.volume * 100)}" aria-label="Volume" style="--pct:${muted ? 0 : audio.volume * 100}%"></div>${ib("expand", "Toggle now playing", "now-panel", "expand-btn", panel === "now")}</div>`;
   document.querySelector(".device-status").textContent =
     isSpotify() && remote.state?.device
       ? `Listening on ${remote.state.device.name}`
       : "";
+  features?.notify("player", playerSnapshot());
+}
+// What is playing, for features (e.g. the island). Keep this stable.
+function playerSnapshot() {
+  return {
+    title: current?.title || "",
+    artist: current?.artist || "",
+    cover: current?.cover || "",
+    playing: Boolean(playing),
+    elapsed,
+    duration,
+    source: mode,
+  };
 }
 function updateTime() {
   const seek = document.querySelector("#seek");
@@ -633,6 +647,7 @@ function updateTime() {
   if (time) time.textContent = formatTime(elapsed);
   const total = document.querySelector("#duration");
   if (total) total.textContent = formatTime(duration);
+  features?.notify("player", playerSnapshot());
 }
 async function navigate(next, record = true) {
   routeSequence++;
@@ -2012,11 +2027,12 @@ const featureContext = {
   navigate,
   playTrack,
   handleError,
+  doAction,
   h,
   icon,
   stale: () => Object.assign(new Error("Source changed."), { stale: true }),
 };
-const features = loadFeatures(featureList, featureContext);
+features = loadFeatures(featureList, featureContext);
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button,[data-track]");
   const existingMenu = document.querySelector(".context-menu");

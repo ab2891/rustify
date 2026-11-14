@@ -32,6 +32,7 @@ const paths = {
     "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 2h6l1 4 4 1 2 5-3 3v4l-5 3-4-2-4 1-4-5 2-4-1-4 5-3z",
   folder: "M3 6V4h7l2 3h9v13H3z",
   logout: "M9 3H3v18h6m5-16 7 7-7 7m-6-7h13",
+  island: "M7 9h10a3 3 0 0 1 0 6H7a3 3 0 0 1 0-6M3 4h18v16H3z",
   info: "M12 11v7m0-12v1M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
 };
 export const icon = (name, cls = "") =>

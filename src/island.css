@@ -1,0 +1,98 @@
+:root {
+  color-scheme: dark;
+  font-family: Arial, Helvetica, sans-serif;
+  --green: #1ed760;
+  --muted: #b3b3b3;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+.island {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 10px 0 12px;
+  border-radius: 34px;
+  background: rgba(14, 14, 14, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  overflow: hidden;
+  cursor: grab;
+}
+.island:active { cursor: grabbing; }
+.cover {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #2a2a2a;
+  pointer-events: none;
+}
+.island.playing .cover { animation: spin 14s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .island.playing .cover { animation: none; } }
+.text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.text strong, .text small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.text strong { font-size: 13px; }
+.text small { font-size: 11px; color: var(--muted); }
+.controls { display: flex; align-items: center; gap: 2px; flex: none; }
+.controls button, .close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+.controls button:hover { background: rgba(255, 255, 255, 0.1); }
+.controls .play { width: 34px; height: 34px; background: #fff; color: #000; }
+.controls .play:hover { background: #fff; transform: scale(1.05); }
+.close { width: 22px; height: 22px; color: var(--muted); opacity: 0; transition: opacity 0.15s; }
+.island:hover .close, .close:focus-visible { opacity: 1; }
+.close:hover { color: #fff; }
+button:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+svg { width: 16px; height: 16px; }
+.progress {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  width: var(--pct, 0%);
+  border-radius: inherit;
+  background: var(--green);
+}
+.empty { color: var(--muted); font-size: 12px; flex: 1; pointer-events: none; }

@@ -32,3 +32,19 @@ test("duplicate action names are rejected", () => {
   const twice = { setup: () => ({ actions: { same() {} } }) };
   assert.throws(() => loadFeatures([{ name: "a", ...twice }, { name: "b", ...twice }], {}), /defined twice/);
 });
+
+test("notify reaches every listener and isolates a failing feature", () => {
+  const got = [];
+  const features = loadFeatures(
+    [
+      { name: "broken", setup: () => ({ on: { player() { throw new Error("boom"); } } }) },
+      { name: "ok", setup: () => ({ on: { player: (s) => got.push(s.title) } }) },
+    ],
+    {},
+  );
+  const original = console.error;
+  console.error = () => {};
+  try { features.notify("player", { title: "Song" }); } finally { console.error = original; }
+  features.notify("unknown", {});
+  assert.deepEqual(got, ["Song"]);
+});

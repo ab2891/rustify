@@ -57,6 +57,12 @@ Six original ambient WAV recordings and original vector covers are bundled. Impo
 
 Local playback supports playlists, track drag/reorder within a playlist, drag tracks to a library playlist, search, likes, history, manual queue, shuffle, repeat all/one, seeking and volume. Local media is not uploaded to Spotify. Space toggles playback, Ctrl/Cmd+K focuses search, M mutes, Ctrl/Cmd+arrows skip, and Alt+Shift+Q opens the queue. Escape closes dialogs; dialogs trap keyboard focus.
 
+## Island (floating mini player)
+
+The island is a small pill-shaped player that floats above other windows. Turn it on or off with the island button in the player bar or **Alt+I**. Drag it anywhere on screen. It remembers where you put it, and if that monitor is disconnected it goes back to the top center. It shows the cover, title and artist, previous/play/next and a progress line. Click the title to bring Rustify to the front. Hover and click × to hide it. It closes with Rustify and works for both Spotify and local music.
+
+How it works: `src-tauri/src/island.rs` creates a frameless, transparent, always-on-top window that is hidden from the taskbar, and saves its position to `island.json` in the app data folder. `island.html` and `src/island.js` only display what they're sent and send commands back. `src/features/island.js` sends it the `player` snapshot and passes its play/next/previous commands to the normal app actions.
+
 ## Adding a feature
 
 Rustify is split so that new features don't have to touch the core.
@@ -70,7 +76,7 @@ Rustify is split so that new features don't have to touch the core.
    - Any other functions you return become available to the app as `features.my-feature.<name>`.
 3. Add it to the list in `src/features/index.js`.
 
-`ctx` is the app's API for features. It includes `api(method, path, body)` for Spotify calls and `spotify` for native IPC. It also has the UI helpers `toast`, `openModal`, `closeModal` and `navigate`, the escaping helpers `h` and `icon`, and live read-only state (`remote`, `mode`, `current`, `library`, `generation`). If a feature needs something else, add it to `featureContext` in `src/main.js`. `src/features/devices.js`, the built-in player and device picker, is a complete example. The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
+Features can also listen to app events with `on: { player(snapshot) {} }`. That one fires whenever the player bar updates, with `{ title, artist, cover, playing, elapsed, duration, source }`. `src/features/island.js` uses it. `ctx` is the app's API for features. It includes `api(method, path, body)` for Spotify calls and `spotify` for native IPC. It also has the UI helpers `toast`, `openModal`, `closeModal` and `navigate`, the escaping helpers `h` and `icon`, and live read-only state (`remote`, `mode`, `current`, `library`, `generation`). If a feature needs something else, add it to `featureContext` in `src/main.js`. `src/features/devices.js` (built-in player and device picker) and `src/features/island.js` (floating mini player) are complete examples. The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
 
 **Rust.** Each concern is its own module, listed in `src-tauri/src/lib.rs`: `library`, `spotify`, `credentials`, `shuffle`, `native_player`, and `desktop`. `desktop` holds the Tauri commands. To add a native capability:
 
@@ -87,7 +93,8 @@ New Spotify Web API endpoints must also be allow-listed in `allowed_url` in `spo
 - `src-tauri/src/bin/player-probe.rs`: dev probe that plays one track on an already-running Rustify device using the saved login.
 - `src-tauri/src/credentials.rs`: platform credential stores and the WSL DPAPI bridge.
 - `src-tauri/src/library.rs`: validated local library model and atomic storage.
-- `src-tauri/src/desktop.rs`: Tauri commands (native import, Spotify, player) and app startup.
+- `src-tauri/src/desktop.rs`: Tauri commands (native import, Spotify, player, island) and app startup.
+- `src-tauri/src/island.rs`, `island.html`, `src/island.js`: the floating island window.
 - `src/features/`: self-contained frontend features and the feature registry.
 - `src/`: vanilla frontend and local-file playback. Local files use the WebView's audio decoder; Spotify audio is played by Soloist.
 - `public/`: original artwork, demo recordings and library seed.
@@ -138,7 +145,7 @@ cargo xwin build --release --target x86_64-pc-windows-msvc --features desktop,cu
 # -> target/x86_64-pc-windows-msvc/release/spotify-rust.exe (rename to Rustify.exe)
 ```
 
-Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 21/21, Playwright 32/32 and Rust 17/17 passed. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
+Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 22/22, Playwright 33/33 and Rust 17/17 passed. The island was checked on Windows through UI Automation: it opened top-center showing the current Spotify track, closed with its own button, and reopened at the position it was moved to. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
 
 
 ## License

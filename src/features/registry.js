@@ -4,14 +4,17 @@
 // `ctx` in main.js) and returns any of:
 //   actions:   { "action-name": async (button) => {} }  // for data-action="action-name"
 //   shortcuts: [{ key: "d", ctrl?, shift?, alt?, run(event) }]
+//   on:        { player(snapshot) {} }  // app events, see notify() calls in main.js
 //   ...anything else, exposed to the app as `features.<name>.<thing>`
 // Register new features in ./index.js. See ./template.js.
 export function loadFeatures(list, ctx) {
   const actions = new Map();
   const shortcuts = [];
+  const listeners = {};
   const api = {};
   for (const feature of list) {
-    const { actions: own = {}, shortcuts: keys = [], ...exports } = feature.setup(ctx) || {};
+    const { actions: own = {}, shortcuts: keys = [], on = {}, ...exports } = feature.setup(ctx) || {};
+    for (const [event, run] of Object.entries(on)) (listeners[event] ||= []).push(run);
     for (const [name, run] of Object.entries(own)) {
       if (actions.has(name)) throw new Error(`Action "${name}" is defined twice (${feature.name}).`);
       actions.set(name, run);
@@ -21,6 +24,12 @@ export function loadFeatures(list, ctx) {
   }
   return {
     ...api,
+    /** Tells every feature listening for `event`; one failing feature never breaks the app. */
+    notify(event, data) {
+      for (const run of listeners[event] || []) {
+        try { run(data); } catch (error) { console.error(error); }
+      }
+    },
     /** Handler for a data-action name, or undefined. */
     action: (name) => actions.get(name),
     /** Runs the first matching shortcut; returns true when one handled the event. */

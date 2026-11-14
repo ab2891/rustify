@@ -111,6 +111,23 @@ export async function importTracks(files) {
   }
   return result;
 }
+// The island window (src/island.js) and the main window talk through events.
+export const island = {
+  async toggle() {
+    if (!native) throw new Error("The island needs the Rustify desktop app.");
+    return invoke("island_toggle");
+  },
+  async publish(state) {
+    if (!native) return;
+    const { emitTo } = await import("@tauri-apps/api/event");
+    await emitTo("island", "island-state", state);
+  },
+  async listen(handlers) {
+    if (!native) return;
+    const { listen } = await import("@tauri-apps/api/event");
+    await Promise.all(Object.entries(handlers).map(([name, run]) => listen(name, (e) => run(e.payload))));
+  },
+};
 export const spotify = {
   async startPlayer() {
     if (!native) throw new Error("Spotify playback on this computer needs the Rustify desktop app.");

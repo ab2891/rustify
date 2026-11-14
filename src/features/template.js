@@ -10,6 +10,9 @@ export default {
       shortcuts: [
         // { key: "h", alt: true, run: () => ctx.toast("Alt+H pressed") },
       ],
+      on: {
+        // player(snapshot) { /* { title, artist, cover, playing, elapsed, duration, source } */ },
+      },
       // Exports are reachable from main.js as features.template.<name>.
     };
   },
