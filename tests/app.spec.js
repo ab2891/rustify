@@ -250,6 +250,8 @@ async function fakeSpotify(page, restore = false, options = {}) {
         invoke: async (command, args) => {
           window.calls.push({ command, args });
           if (command === "island_toggle") return (window.islandOpen = !window.islandOpen);
+          if (command === "get_autostart") return Boolean(window.autostart);
+          if (command === "set_autostart") return (window.autostart = args.enabled);
           if (command === "plugin:event|listen") { (window.eventHandlers ||= {})[args.event] = args.handler; return args.handler; }
           if (command === "plugin:event|emit_to") { (window.emitted ||= []).push(args); return null; }
           if (command === "spotify_player_start") { window.playerStarted = true; return "rustify-player"; }
@@ -1133,3 +1135,66 @@ test("island opens from the player bar, mirrors playback and sends commands", as
   await page.keyboard.press("Alt+I");
   await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "island_toggle").length)).toBe(2);
 });
+
+test("media keys, tray and hotkey commands control playback", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["media-command"]))).toBe(true);
+  expect(await page.evaluate(() => window.calls.find((c) => c.command === "set_close_to_tray")?.args)).toEqual({ enabled: true });
+  expect(await page.evaluate(() => window.calls.find((c) => c.command === "set_hotkeys")?.args)).toEqual({ enabled: true });
+  await page.evaluate(() => window.fireEvent("media-command", "next"));
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/next")))).toBe(true);
+  await page.evaluate(() => window.fireEvent("media-command", "island"));
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.command === "island_toggle"))).toBe(true);
+});
+
+test("Settings toggles tray, hotkeys and island options", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Keep running in the tray");
+  await dialog.locator('[data-action="system-tray"]').click();
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "set_close_to_tray").at(-1)?.args)).toEqual({ enabled: false });
+  await dialog.locator('[data-action="system-hotkeys"]').click();
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "set_hotkeys").at(-1)?.args)).toEqual({ enabled: false });
+  await dialog.locator('[data-action="island-compact"]').click();
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "island_configure").at(-1)?.args)).toEqual({ options: { compact: true, click_through: false } });
+  await dialog.locator('[data-action="island-opacity"][data-value="70"]').click();
+  await expect(dialog.locator('[data-action="island-opacity"][data-value="70"]')).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("rustify-island")))).toMatchObject({ compact: true, opacity: 70 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("rustify-system")))).toEqual({ tray: false, hotkeys: false });
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.command === "set_close_to_tray")?.args)).toEqual({ enabled: false });
+});
+
+test("sleep timer pauses playback after the chosen time", async ({ page }) => {
+  await page.clock.install();
+  await fakeSpotify(page, true);
+  await page.getByRole("textbox", { name: "Search music", exact: true }).fill("ambient");
+  await page.getByRole("row", { name: "Play Remote song by Remote artist", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await page.locator('[data-action="sleep-timer"][data-value="15"]').click();
+  await expect(page.getByRole("dialog")).toContainText("Pauses in 15 min.");
+  const before = await page.evaluate(() => window.calls.filter((c) => c.args?.path?.startsWith("/me/player/pause")).length);
+  await page.clock.fastForward("15:01");
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.args?.path?.startsWith("/me/player/pause")).length)).toBeGreaterThan(before);
+  await expect(page.getByRole("status")).toContainText("Sleep timer: playback paused.");
+});
+
+test("no browser context menu outside text fields; start with Windows toggles", async ({ page }) => {
+  await fakeSpotify(page, true);
+  const prevented = (selector) =>
+    page.evaluate((selector) => {
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      document.querySelector(selector).dispatchEvent(event);
+      return event.defaultPrevented;
+    }, selector);
+  expect(await prevented(".player")).toBe(true);
+  expect(await prevented("#global-search")).toBe(false);
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Start with Windows");
+  await page.locator('[data-action="system-autostart"]').click();
+  await expect.poll(() => page.evaluate(() => window.autostart)).toBe(true);
+  await expect(page.locator('[data-action="system-autostart"]')).toHaveAttribute("aria-pressed", "true");
+});
+

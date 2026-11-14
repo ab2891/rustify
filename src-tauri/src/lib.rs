@@ -5,12 +5,19 @@
 //! - `shuffle`: True shuffle ordering
 //! - `native_player`: the built-in Spotify Soloist player (desktop only)
 //! - `island`: the floating always-on-top mini player (desktop only)
+//! - `media`, `tray`, `hotkeys`: Windows media controls, tray icon, global hotkeys (desktop only)
 //! - `desktop`: Tauri commands and app startup (desktop only)
 pub mod credentials;
 #[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
+mod hotkeys;
+#[cfg(feature = "desktop")]
 pub mod island;
+#[cfg(feature = "desktop")]
+mod media;
+#[cfg(feature = "desktop")]
+mod tray;
 pub mod library;
 #[cfg(feature = "desktop")]
 pub mod native_player;

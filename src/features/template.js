@@ -10,6 +10,8 @@ export default {
       shortcuts: [
         // { key: "h", alt: true, run: () => ctx.toast("Alt+H pressed") },
       ],
+      // settings: () => `<div class="setting-row">…</div>`,
+      // async start() { /* runs once after the app loads */ },
       on: {
         // player(snapshot) { /* { title, artist, cover, playing, elapsed, duration, source } */ },
       },

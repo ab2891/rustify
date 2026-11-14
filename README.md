@@ -57,9 +57,29 @@ Six original ambient WAV recordings and original vector covers are bundled. Impo
 
 Local playback supports playlists, track drag/reorder within a playlist, drag tracks to a library playlist, search, likes, history, manual queue, shuffle, repeat all/one, seeking and volume. Local media is not uploaded to Spotify. Space toggles playback, Ctrl/Cmd+K focuses search, M mutes, Ctrl/Cmd+arrows skip, and Alt+Shift+Q opens the queue. Escape closes dialogs; dialogs trap keyboard focus.
 
+## Running in the background
+
+- **Media keys and Windows media controls.** Play/pause/next/previous keys work from anywhere. The Windows volume flyout and lock screen show the song, artist and cover, and can control playback (`media.rs`). Chromium's own media-key handling is turned off in WebView2 (`additionalBrowserArgs`) so only one Rustify entry appears.
+- **Tray.** By default, closing the window hides Rustify to the tray and the music keeps playing. The tray menu has Play/Pause, Next, Previous, Show Rustify, Show/hide island and Quit. Clicking the tray icon reopens the window. Turn this off in Settings to make closing the window quit (`tray.rs`).
+- **Global hotkeys.** These work from any app (`hotkeys.rs`), and can be switched off in Settings. A combination another app already owns is skipped, and Rustify says which one.
+  - Ctrl+Alt+Space: play/pause
+  - Ctrl+Alt+→: next
+  - Ctrl+Alt+←: previous
+  - Ctrl+Alt+I: show/hide the island
+- **Start with Windows.** Off by default; turn it on in Settings. Rustify then starts in the tray at sign-in (`--minimized`), with no window flash.
+- **Single instance.** Launching Rustify while it is already running brings up the existing window. Two copies never compete for the Soloist player.
+- **Sleep timer.** In Settings: pause after 15/30/60 minutes or at the end of the current song.
+
+Media keys, the tray, the hotkeys and the island all send the same `media-command` event to the frontend. `src/features/system.js` handles it.
+
 ## Island (floating mini player)
 
-The island is a small pill-shaped player that floats above other windows. Turn it on or off with the island button in the player bar or **Alt+I**. Drag it anywhere on screen. It remembers where you put it, and if that monitor is disconnected it goes back to the top center. It shows the cover, title and artist, previous/play/next and a progress line. Click the title to bring Rustify to the front. Hover and click × to hide it. It closes with Rustify and works for both Spotify and local music.
+The island is a small pill-shaped player that floats above other windows. Turn it on or off with the island button in the player bar or **Alt+I**. Drag it anywhere on screen. It remembers where you put it, and if that monitor is disconnected it goes back to the top center. It shows the cover, title and artist, previous/play/next and a progress line. Click the title to bring Rustify to the front. Hover and click × to hide it. It closes with Rustify and works for both Spotify and local music. Settings has these island options:
+
+- **Compact:** only the spinning cover; hover it for play/pause.
+- **Hide while paused.**
+- **Opacity:** 100/85/70/50%.
+- **Click-through:** clicks reach the window underneath. Turn it off in Settings.
 
 How it works: `src-tauri/src/island.rs` creates a frameless, transparent, always-on-top window that is hidden from the taskbar, and saves its position to `island.json` in the app data folder. `island.html` and `src/island.js` only display what they're sent and send commands back. `src/features/island.js` sends it the `player` snapshot and passes its play/next/previous commands to the normal app actions.
 
@@ -76,7 +96,12 @@ Rustify is split so that new features don't have to touch the core.
    - Any other functions you return become available to the app as `features.my-feature.<name>`.
 3. Add it to the list in `src/features/index.js`.
 
-Features can also listen to app events with `on: { player(snapshot) {} }`. That one fires whenever the player bar updates, with `{ title, artist, cover, playing, elapsed, duration, source }`. `src/features/island.js` uses it. `ctx` is the app's API for features. It includes `api(method, path, body)` for Spotify calls and `spotify` for native IPC. It also has the UI helpers `toast`, `openModal`, `closeModal` and `navigate`, the escaping helpers `h` and `icon`, and live read-only state (`remote`, `mode`, `current`, `library`, `generation`). If a feature needs something else, add it to `featureContext` in `src/main.js`. `src/features/devices.js` (built-in player and device picker) and `src/features/island.js` (floating mini player) are complete examples. The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
+Features can also add a Settings section with `settings: () => html`, run code once at startup with `start()`, and listen to app events with `on: { player(snapshot) {} }`. That one fires whenever the player bar updates, with `{ title, artist, cover, playing, elapsed, duration, source }`. `src/features/island.js` uses it. `ctx` is the app's API for features. It includes `api(method, path, body)` for Spotify calls and `spotify` for native IPC. It also has the UI helpers `toast`, `openModal`, `closeModal` and `navigate`, the escaping helpers `h` and `icon`, and live read-only state (`remote`, `mode`, `current`, `library`, `generation`). If a feature needs something else, add it to `featureContext` in `src/main.js`. These files are complete examples:
+
+- `src/features/devices.js`: built-in player and device picker
+- `src/features/island.js`: floating mini player
+- `src/features/system.js`: media keys, tray and hotkeys
+- `src/features/sleep.js`: sleep timer The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
 
 **Rust.** Each concern is its own module, listed in `src-tauri/src/lib.rs`: `library`, `spotify`, `credentials`, `shuffle`, `native_player`, and `desktop`. `desktop` holds the Tauri commands. To add a native capability:
 
@@ -95,6 +120,7 @@ New Spotify Web API endpoints must also be allow-listed in `allowed_url` in `spo
 - `src-tauri/src/library.rs`: validated local library model and atomic storage.
 - `src-tauri/src/desktop.rs`: Tauri commands (native import, Spotify, player, island) and app startup.
 - `src-tauri/src/island.rs`, `island.html`, `src/island.js`: the floating island window.
+- `src-tauri/src/media.rs`, `tray.rs`, `hotkeys.rs`: Windows media controls, tray icon and global hotkeys.
 - `src/features/`: self-contained frontend features and the feature registry.
 - `src/`: vanilla frontend and local-file playback. Local files use the WebView's audio decoder; Spotify audio is played by Soloist.
 - `public/`: original artwork, demo recordings and library seed.
@@ -145,7 +171,17 @@ cargo xwin build --release --target x86_64-pc-windows-msvc --features desktop,cu
 # -> target/x86_64-pc-windows-msvc/release/spotify-rust.exe (rename to Rustify.exe)
 ```
 
-Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 22/22, Playwright 33/33 and Rust 17/17 passed. The island was checked on Windows through UI Automation: it opened top-center showing the current Spotify track, closed with its own button, and reopened at the position it was moved to. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
+Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 22/22, Playwright 37/37 and Rust 17/17 passed. The island was checked on Windows through UI Automation: it opened top-center showing the current Spotify track, closed with its own button, and reopened at the position it was moved to.
+
+Background features were checked on Windows on 2026-11-14:
+
+- Rustify appears in Windows media controls with title, artist and cover.
+- The media play/pause key paused and resumed playback, and Ctrl+Alt+→ skipped the track.
+- Ctrl+Alt+I opened the island. Compact mode resized it to 68×68, and hide-while-paused hid and re-showed it.
+- Click-through set WS_EX_TRANSPARENT, and 50% opacity rendered translucent.
+- Closing the window kept Rustify and the music running hidden. A second launch reused the running copy.
+- With tray mode off, closing the window exited Rustify and Soloist.
+- Not automated: the tray menu items (Windows 11 doesn't expose them to UI Automation) and Start with Windows (it writes the HKCU Run key, so it was left for the user to enable). Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
 
 
 ## License

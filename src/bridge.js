@@ -123,9 +123,39 @@ export const island = {
     await emitTo("island", "island-state", state);
   },
   async listen(handlers) {
-    if (!native) return;
-    const { listen } = await import("@tauri-apps/api/event");
-    await Promise.all(Object.entries(handlers).map(([name, run]) => listen(name, (e) => run(e.payload))));
+    return listenAll(handlers);
+  },
+  async configure(options) {
+    if (native) await invoke("island_configure", { options });
+  },
+  async setVisible(visible) {
+    if (native) await invoke("island_set_visible", { visible });
+  },
+};
+async function listenAll(handlers) {
+  if (!native) return;
+  const { listen } = await import("@tauri-apps/api/event");
+  await Promise.all(Object.entries(handlers).map(([name, run]) => listen(name, (e) => run(e.payload))));
+}
+// Windows media controls, tray and global hotkeys (src-tauri media/tray/hotkeys.rs).
+export const system = {
+  native,
+  listen: listenAll,
+  async mediaUpdate(now) {
+    if (native) await invoke("media_update", { now });
+  },
+  async setCloseToTray(enabled) {
+    if (native) await invoke("set_close_to_tray", { enabled });
+  },
+  async getAutostart() {
+    return native ? Boolean(await invoke("get_autostart")) : false;
+  },
+  async setAutostart(enabled) {
+    return native ? Boolean(await invoke("set_autostart", { enabled })) : false;
+  },
+  /** Returns hotkeys another app already owns. */
+  async setHotkeys(enabled) {
+    return native ? invoke("set_hotkeys", { enabled }) : [];
   },
 };
 export const spotify = {

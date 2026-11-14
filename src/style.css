@@ -1609,7 +1609,8 @@ input[type="range"]:hover {
   text-decoration: underline;
   padding: 2px 0;
 }
-.shuffle-setting {
+.shuffle-setting,
+.setting-row {
   display: flex;
   gap: 14px;
   align-items: center;
@@ -1617,11 +1618,32 @@ input[type="range"]:hover {
   border-top: 1px solid #ffffff18;
   margin-top: 20px;
 }
-.shuffle-setting strong {
+.shuffle-setting strong,
+.setting-row strong {
   font-size: 14px;
 }
-.shuffle-setting .chip {
+.shuffle-setting .chip,
+.setting-row .chip {
   flex: none;
+}
+.setting-row {
+  margin-top: 0;
+}
+.setting-row p {
+  margin: 4px 0 0;
+}
+.setting-group {
+  margin-top: 20px;
+}
+.setting-group h3 {
+  font-size: 13px;
+  margin: 0 0 4px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.setting-row .chips {
+  flex-wrap: nowrap;
 }
 .inline-link {
   font: inherit;

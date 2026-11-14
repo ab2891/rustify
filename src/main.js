@@ -1487,7 +1487,7 @@ function openConnect() {
 function openSettings() {
   openModal(
     "Settings",
-    `<p><strong>${h(remote.profile?.display_name || "Rustify")}</strong><br>${connected() ? "Connected to Spotify. Your login is saved securely on this device." : "Connect Spotify or listen to music stored on this device."}</p><p>Playback source</p><div class="chips"><button class="chip ${isSpotify() ? "selected" : ""}" data-mode="spotify">Spotify</button><button class="chip ${!isSpotify() ? "selected" : ""}" data-mode="local">Local files</button></div><p>Spotify plays through Rustify’s built-in player; no browser tab needed. Local files play directly in Rustify.</p><div class="shuffle-setting"><div><strong>True shuffle</strong><p>Equal odds for every unique song. No artist weighting or repeats within a cycle. Duplicate copies count once; songs you add manually and Repeat One can still repeat. On Spotify, Repeat All replays this order. Use Reshuffle for a new order.</p></div><button class="chip ${trueShuffle ? "selected" : ""}" data-action="shuffle" aria-pressed="${trueShuffle}">${trueShuffle ? "On" : "Off"}</button></div><button class="white-button" data-action="import">Import local music</button><p style="margin-top:24px">Rustify is an independent Rust/Tauri app. The bundled music and artwork are original demos.</p>`,
+    `<p><strong>${h(remote.profile?.display_name || "Rustify")}</strong><br>${connected() ? "Connected to Spotify. Your login is saved securely on this device." : "Connect Spotify or listen to music stored on this device."}</p><p>Playback source</p><div class="chips"><button class="chip ${isSpotify() ? "selected" : ""}" data-mode="spotify">Spotify</button><button class="chip ${!isSpotify() ? "selected" : ""}" data-mode="local">Local files</button></div><p>Spotify plays through Rustify’s built-in player; no browser tab needed. Local files play directly in Rustify.</p><div class="shuffle-setting"><div><strong>True shuffle</strong><p>Equal odds for every unique song. No artist weighting or repeats within a cycle. Duplicate copies count once; songs you add manually and Repeat One can still repeat. On Spotify, Repeat All replays this order. Use Reshuffle for a new order.</p></div><button class="chip ${trueShuffle ? "selected" : ""}" data-action="shuffle" aria-pressed="${trueShuffle}">${trueShuffle ? "On" : "Off"}</button></div>${features?.settingsHTML() || ""}<button class="white-button" data-action="import">Import local music</button><p style="margin-top:24px">Rustify is an independent Rust/Tauri app. The bundled music and artwork are original demos.</p>`,
     `<button class="${connected() ? "white-button" : "green-button"}" data-action="${connected() ? "disconnect" : "connect"}">${connected() ? "Disconnect Spotify" : "Connect Spotify"}</button>`,
   );
 }
@@ -2008,6 +2008,10 @@ function handleError(error) {
   if (status) status.textContent = message;
   else toast(message, true);
 }
+// No browser context menu (Back/Reload/Inspect) except in text fields.
+document.addEventListener("contextmenu", (event) => {
+  if (!event.target.closest?.("input, textarea")) event.preventDefault();
+});
 // Context handed to feature modules. Getters keep reassigned state current.
 const featureContext = {
   get generation() { return generation; },
@@ -2028,11 +2032,13 @@ const featureContext = {
   playTrack,
   handleError,
   doAction,
+  openSettings,
   h,
   icon,
   stale: () => Object.assign(new Error("Source changed."), { stale: true }),
 };
 features = loadFeatures(featureList, featureContext);
+features.start();
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button,[data-track]");
   const existingMenu = document.querySelector(".context-menu");

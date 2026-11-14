@@ -1,9 +1,9 @@
 //! Tauri commands and app startup. To add a feature: write a `#[tauri::command]`
 //! here (or in a new module) and register it in `run()`'s `generate_handler!`.
 use crate::{
-    credentials, island,
+    credentials, hotkeys, island,
     library::{load_library, save_library, Library, Track},
-    native_player, shuffle, spotify,
+    media, native_player, shuffle, spotify, tray,
 };
 use std::{fs, path::PathBuf};
 use tauri::{Manager, State};
@@ -155,10 +155,66 @@ async fn island_toggle(app: tauri::AppHandle) -> Result<bool, String> {
 async fn island_show_main(app: tauri::AppHandle) -> Result<(), String> {
     island::show_main(&app)
 }
+#[tauri::command]
+fn island_configure(app: tauri::AppHandle, options: island::Options) {
+    island::configure(&app, options);
+}
+#[tauri::command]
+fn island_set_visible(app: tauri::AppHandle, visible: bool) {
+    island::set_visible(&app, visible);
+}
+/// Now-playing for Windows media controls and the tray tooltip.
+#[tauri::command]
+fn media_update(app: tauri::AppHandle, now: media::NowPlaying) {
+    tray::set_tooltip(
+        &app,
+        &if now.title.is_empty() {
+            "Rustify".to_string()
+        } else {
+            // Windows truncates tray tooltips at 127 characters.
+            format!("{} · {}", now.title, now.artist).chars().take(120).collect()
+        },
+    );
+    media::update(&app, now);
+}
+#[tauri::command]
+fn set_close_to_tray(enabled: bool) {
+    tray::CLOSE_TO_TRAY.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+/// Returns the hotkeys that could not be registered.
+#[tauri::command]
+fn set_hotkeys(app: tauri::AppHandle, enabled: bool) -> Vec<String> {
+    hotkeys::set_enabled(&app, enabled)
+}
+/// Start with Windows (hidden in the tray). Returns the new state.
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    let result = if enabled { launcher.enable() } else { launcher.disable() };
+    result.map_err(|e| format!("Could not change start-up setting: {e}"))?;
+    launcher.is_enabled().map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+/// Started by Windows at sign-in: stay in the tray instead of showing the window.
+const MINIMIZED: &str = "--minimized";
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch just shows the running Rustify, so two
+        // copies never fight over the Soloist player.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show_main(app)))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .args([MINIMIZED])
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(hotkeys::plugin())
         .manage(Store(std::sync::Mutex::new(())))
         .manage(native_player::NativePlayer::default())
         .setup(|app| {
@@ -166,9 +222,30 @@ pub fn run() {
             app.manage(std::sync::Arc::new(spotify::Spotify::with_vault(
                 std::sync::Arc::new(vault),
             )));
+            let handle = app.handle();
+            if let Err(e) = tray::init(handle) {
+                eprintln!("tray unavailable: {e}");
+            }
+            if let Err(e) = media::init(handle) {
+                eprintln!("media controls unavailable: {e}");
+            }
+            // Default on; the frontend re-applies the saved setting at startup.
+            hotkeys::set_enabled(handle, true);
+            // The window starts hidden (tauri.conf.json) to avoid a flash when
+            // launched at sign-in; show it unless that is the case.
+            if !std::env::args().any(|a| a == MINIMIZED) {
+                tray::show_main(handle);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Closing the window keeps Rustify playing in the tray (if enabled).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && tray::close_to_tray() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
             // The island mirrors the main window; close it with the app.
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 if let Some(island) = window.app_handle().get_webview_window(island::LABEL) {
@@ -189,7 +266,14 @@ pub fn run() {
             spotify_player_status,
             spotify_player_stop,
             island_toggle,
-            island_show_main
+            island_show_main,
+            island_configure,
+            island_set_visible,
+            media_update,
+            set_close_to_tray,
+            set_hotkeys,
+            set_autostart,
+            get_autostart
         ])
         .build(tauri::generate_context!())
         .expect("Could not launch desktop app")

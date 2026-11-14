@@ -17,6 +17,14 @@ function position() {
 }
 
 function render() {
+  const style = state?.style || {};
+  document.documentElement.style.setProperty("--opacity", String((style.opacity ?? 100) / 100));
+  document.body.classList.toggle("compact", Boolean(style.compact));
+  if (style.compact) {
+    root.className = `island${state?.playing ? " playing" : ""}`;
+    root.innerHTML = `${state?.cover ? `<img class="cover" src="${h(state.cover)}" alt="">` : `<div class="cover"></div>`}${state?.title ? `<button class="play overlay" data-command="play" aria-label="${state.playing ? "Pause" : "Play"}" title="${h(state.title)} · ${h(state.artist)}">${icon(state.playing ? "pause" : "play")}</button>` : ""}`;
+    return;
+  }
   if (!state?.title) {
     root.className = "island";
     root.innerHTML = `<span class="empty" data-tauri-drag-region>Nothing playing. Pick something in Rustify.</span>${closeButton()}`;
@@ -34,6 +42,7 @@ function tick() {
   if (bar) bar.style.setProperty("--pct", `${state?.duration ? (position() / state.duration) * 100 : 0}%`);
 }
 
+document.addEventListener("contextmenu", (event) => event.preventDefault());
 root.addEventListener("click", async (event) => {
   const command = event.target.closest("[data-command]")?.dataset.command;
   if (!command) return;
@@ -44,7 +53,10 @@ root.addEventListener("click", async (event) => {
 
 await listen("island-state", (event) => {
   const next = event.payload;
-  const changed = !state || ["title", "artist", "cover", "playing"].some((k) => state[k] !== next[k]);
+  const changed =
+    !state ||
+    ["title", "artist", "cover", "playing"].some((k) => state[k] !== next[k]) ||
+    JSON.stringify(state.style) !== JSON.stringify(next.style);
   state = next;
   receivedAt = Date.now();
   if (changed) render();

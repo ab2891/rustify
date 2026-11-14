@@ -15,6 +15,43 @@ use tauri::{
 pub const LABEL: &str = "island";
 const WIDTH: f64 = 380.0;
 const HEIGHT: f64 = 68.0;
+const COMPACT: f64 = 68.0;
+/// Must match `additionalBrowserArgs` in tauri.conf.json: WebView2 refuses a
+/// second window with different arguments. HardwareMediaKeyHandling is off so
+/// only Rustify's own media session (media.rs) appears in Windows.
+pub const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling";
+
+/// User options from Settings, applied when the island opens and when changed.
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+pub struct Options {
+    pub compact: bool,
+    pub click_through: bool,
+}
+pub static OPTIONS: Mutex<Options> = Mutex::new(Options { compact: false, click_through: false });
+
+fn size(options: Options) -> tauri::LogicalSize<f64> {
+    if options.compact {
+        tauri::LogicalSize::new(COMPACT, COMPACT)
+    } else {
+        tauri::LogicalSize::new(WIDTH, HEIGHT)
+    }
+}
+
+/// Applies changed options to an open island.
+pub fn configure(app: &AppHandle, options: Options) {
+    *OPTIONS.lock().unwrap() = options;
+    if let Some(window) = app.get_webview_window(LABEL) {
+        let _ = window.set_size(size(options));
+        let _ = window.set_ignore_cursor_events(options.click_through);
+    }
+}
+
+/// Hides or shows an open island without closing it (used by "hide while paused").
+pub fn set_visible(app: &AppHandle, visible: bool) {
+    if let Some(window) = app.get_webview_window(LABEL) {
+        let _ = if visible { window.show() } else { window.hide() };
+    }
+}
 
 /// Opens the island, or closes it if open. Returns whether it is now open.
 pub fn toggle(app: &AppHandle, data_dir: PathBuf) -> Result<bool, String> {
@@ -22,9 +59,12 @@ pub fn toggle(app: &AppHandle, data_dir: PathBuf) -> Result<bool, String> {
         window.close().map_err(|e| e.to_string())?;
         return Ok(false);
     }
+    let options = *OPTIONS.lock().unwrap();
+    let initial = size(options);
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("island.html".into()))
         .title("Rustify island")
-        .inner_size(WIDTH, HEIGHT)
+        .additional_browser_args(BROWSER_ARGS)
+        .inner_size(initial.width, initial.height)
         .resizable(false)
         .decorations(false)
         .transparent(true)
@@ -41,6 +81,7 @@ pub fn toggle(app: &AppHandle, data_dir: PathBuf) -> Result<bool, String> {
     if let Some(position) = position {
         let _ = window.set_position(position);
     }
+    let _ = window.set_ignore_cursor_events(options.click_through);
     window.show().map_err(|e| e.to_string())?;
 
     let last_write = Arc::new(Mutex::new((None::<PhysicalPosition<i32>>, Instant::now())));
