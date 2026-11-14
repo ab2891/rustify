@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "tracks": [
+    {
+      "id": "night-drive",
+      "title": "Night Drive",
+      "artist": "Signal Coast",
+      "album": "Night Drive",
+      "duration": 16,
+      "src": "/audio/night-drive.wav",
+      "cover": "/art/night-drive.svg",
+      "imported": false
+    },
+    {
+      "id": "soft-focus",
+      "title": "Soft Focus",
+      "artist": "June Atlas",
+      "album": "Soft Focus",
+      "duration": 18,
+      "src": "/audio/soft-focus.wav",
+      "cover": "/art/soft-focus.svg",
+      "imported": false
+    },
+    {
+      "id": "blue-hour",
+      "title": "Blue Hour",
+      "artist": "North Arcade",
+      "album": "Blue Hour",
+      "duration": 20,
+      "src": "/audio/blue-hour.wav",
+      "cover": "/art/blue-hour.svg",
+      "imported": false
+    },
+    {
+      "id": "daylight",
+      "title": "Daylight",
+      "artist": "Paper Gardens",
+      "album": "Daylight",
+      "duration": 22,
+      "src": "/audio/daylight.wav",
+      "cover": "/art/daylight.svg",
+      "imported": false
+    },
+    {
+      "id": "still-water",
+      "title": "Still Water",
+      "artist": "Low Season",
+      "album": "Still Water",
+      "duration": 24,
+      "src": "/audio/still-water.wav",
+      "cover": "/art/still-water.svg",
+      "imported": false
+    },
+    {
+      "id": "new-beginnings",
+      "title": "New Beginnings",
+      "artist": "Sunday Cinema",
+      "album": "New Beginnings",
+      "duration": 26,
+      "src": "/audio/new-beginnings.wav",
+      "cover": "/art/new-beginnings.svg",
+      "imported": false
+    }
+  ],
+  "liked": [],
+  "recent": [],
+  "playlists": [
+    {
+      "id": "late-nights",
+      "title": "Late nights",
+      "description": "Original ambient demos for the quieter hours.",
+      "cover": "/art/night-drive.svg",
+      "track_ids": [
+        "night-drive",
+        "soft-focus",
+        "blue-hour",
+        "daylight"
+      ]
+    },
+    {
+      "id": "slow-mornings",
+      "title": "Slow mornings",
+      "description": "A little room to breathe.",
+      "cover": "/art/soft-focus.svg",
+      "track_ids": [
+        "blue-hour",
+        "daylight",
+        "still-water",
+        "new-beginnings"
+      ]
+    }
+  ]
+}

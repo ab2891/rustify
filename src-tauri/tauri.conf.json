@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Rustify",
+  "version": "0.1.0",
+  "identifier": "dev.local.spotify-rust",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Rustify",
+        "width": 1440,
+        "height": 950,
+        "minWidth": 820,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost https://*.scdn.co https://*.spotifycdn.com data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/media/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
