@@ -140,3 +140,7 @@ cargo xwin build --release --target x86_64-pc-windows-msvc --features desktop,cu
 
 Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 21/21, Playwright 32/32 and Rust 17/17 passed. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
 
+
+## License
+
+MIT. See [LICENSE](LICENSE).
