@@ -1,20 +1,20 @@
 # Rustify
 
-A standalone Rust/Tauri desktop music app with a Spotify-style three-panel interface, an authorized Spotify Web API integration, and a local music player. It is isolated from the Stax workspaces.
+A standalone Rust/Tauri desktop music app with a Spotify-style three-panel interface, an authorized Spotify Web API integration, and a local music player.
 
 ## Run
 
 Install [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust stable first. On Ubuntu/Debian, these include `build-essential libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev`.
 
 ```sh
-cd ~/projects/rustify
+cd rustify
 npm ci
 cp .env.example .env.local
 # Put your public Spotify Client ID in .env.local.
 npm run desktop
 ```
 
-The current workstation already has its supplied Client ID in `.env.local` with owner-only permissions. That file is ignored by Git. An env file is plaintext, not encrypted; a Client ID is public and will also be present in the frontend bundle. **Never put a Spotify client secret here.** PKCE requires no secret. Access tokens stay in memory in Rust and are never persisted. The refresh token and public Client ID are saved in the system credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service). WSL uses Windows DPAPI CurrentUser encryption with ciphertext stored in app-owned data outside the repo, permissions 0600. Rustify restores your session at startup without reopening the browser, persists rotated refresh tokens, and removes saved credentials when you disconnect. There is no plaintext fallback. Unlock the system credential store if prompted.
+Keep your Client ID in `.env.local` with owner-only permissions. Git ignores that file. An env file is plaintext, not encrypted; a Client ID is public and will also be present in the frontend bundle. **Never put a Spotify client secret here.** PKCE requires no secret. Access tokens stay in memory in Rust and are never persisted. The refresh token and public Client ID are saved in the system credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service). WSL uses Windows DPAPI CurrentUser encryption with ciphertext stored in app-owned data outside the repo, permissions 0600. Rustify restores your session at startup without reopening the browser, persists rotated refresh tokens, and removes saved credentials when you disconnect. There is no plaintext fallback. Unlock the system credential store if prompted.
 
 For the frontend/local player in a browser, run `npm run dev` and open `http://127.0.0.1:1420`. Choose **Try local music**. Spotify sign-in and commands require the native desktop app.
 
@@ -29,11 +29,11 @@ For the frontend/local player in a browser, run `npm run dev` and open `http://1
 
 ## Built-in Spotify player (Spotify Soloist)
 
-Rustify plays Spotify audio itself through [Spotify Soloist](https://developer.spotify.com/documentation/soloist), Spotify's official headless Spotify Connect client. Rustify starts it as a hidden background process named **Rustify**, then controls it through the Web API like any other device. There is no Spotify app window and no browser tab. Measured on this workstation it uses about 50–60 MB of RAM. Rustify stops it when Rustify closes.
+Rustify plays Spotify audio itself through [Spotify Soloist](https://developer.spotify.com/documentation/soloist), Spotify's official headless Spotify Connect client. Rustify starts it as a hidden background process named **Rustify**, then controls it through the Web API like any other device. There is no Spotify app window and no browser tab. In testing it used about 50–60 MB of RAM. Rustify stops it when Rustify closes.
 
 When you press play with no active device, Rustify starts the player automatically. **Devices → Play on this computer** does the same. Other Spotify Connect devices remain selectable.
 
-One-time setup on Windows (already done on this workstation):
+One-time setup on Windows:
 
 1. **Install Soloist.** Spotify does not allow redistributing it, so it is not bundled. Download the Windows build from [Downloads and updates](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates) and extract it to `%LOCALAPPDATA%\Rustify\soloist\` so that `soloist.exe` is in that folder.
 2. **Add the API key.** Generate a Soloist API key on the Spotify for Developers dashboard (Premium account). Put `SOLOIST_API_KEY=...` in `%LOCALAPPDATA%\Rustify\.env`. Rustify also accepts it from the process environment. For development, keep it in the git-ignored `.env.local`. It is not `VITE_`-prefixed, so it never reaches the frontend bundle. Never commit the key.
@@ -43,7 +43,7 @@ One-time setup on Windows (already done on this workstation):
 
 `RUSTIFY_HOME` overrides the `%LOCALAPPDATA%\Rustify` folder. The Linux/WSL build doesn't use Soloist, so on Linux, play through another Spotify device.
 
-**Why not librespot or a browser tab?** The previous design used the Web Playback SDK in a Chrome/Edge tab, which was heavy and fragile; that code is archived in `~/projects/rustify-browser-player-backup-2026-11-14.tar.gz`. librespot (unofficial) was tried on 2026-11-14. Its login and device registration worked, but Spotify refused audio decryption keys for this account (`error audio key 0 1`, [librespot#1649](https://github.com/librespot-org/librespot/issues/1649)).
+**Why not librespot or a browser tab?** The previous design used the Web Playback SDK in a Chrome/Edge tab, which was heavy and fragile; that design was retired. librespot (unofficial) was tried on 2026-11-14. Its login and device registration worked, but Spotify refused audio decryption keys for the test account (`error audio key 0 1`, [librespot#1649](https://github.com/librespot-org/librespot/issues/1649)).
 
 The integration supports account sign-in, paginated playlists and saved tracks, paginated catalog search, album and playlist tracks, playlist creation/editing/add/remove, saved-song actions, device selection, playback, queueing, seek, volume, shuffle and repeat. API failures, unavailable devices and rate limits surface in the UI. Playlist contents can be restricted to owned/collaborative playlists in Development Mode.
 
@@ -57,13 +57,38 @@ Six original ambient WAV recordings and original vector covers are bundled. Impo
 
 Local playback supports playlists, track drag/reorder within a playlist, drag tracks to a library playlist, search, likes, history, manual queue, shuffle, repeat all/one, seeking and volume. Local media is not uploaded to Spotify. Space toggles playback, Ctrl/Cmd+K focuses search, M mutes, Ctrl/Cmd+arrows skip, and Alt+Shift+Q opens the queue. Escape closes dialogs; dialogs trap keyboard focus.
 
+## Adding a feature
+
+Rustify is split so that new features don't have to touch the core.
+
+**Frontend.** Put each feature in its own file in `src/features/`:
+
+1. Copy `src/features/template.js` to `src/features/my-feature.js` and give it a unique `name`.
+2. In `setup(ctx)`, return the feature's parts:
+   - `actions`: buttons with `data-action="name"` call these.
+   - `shortcuts`: keyboard shortcuts.
+   - Any other functions you return become available to the app as `features.my-feature.<name>`.
+3. Add it to the list in `src/features/index.js`.
+
+`ctx` is the app's API for features. It includes `api(method, path, body)` for Spotify calls and `spotify` for native IPC. It also has the UI helpers `toast`, `openModal`, `closeModal` and `navigate`, the escaping helpers `h` and `icon`, and live read-only state (`remote`, `mode`, `current`, `library`, `generation`). If a feature needs something else, add it to `featureContext` in `src/main.js`. `src/features/devices.js`, the built-in player and device picker, is a complete example. The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
+
+**Rust.** Each concern is its own module, listed in `src-tauri/src/lib.rs`: `library`, `spotify`, `credentials`, `shuffle`, `native_player`, and `desktop`. `desktop` holds the Tauri commands. To add a native capability:
+
+1. Write a module.
+2. Expose it through a `#[tauri::command]` in `desktop.rs`, and register the command in `generate_handler!`.
+3. Call it from the frontend through `src/bridge.js`.
+
+New Spotify Web API endpoints must also be allow-listed in `allowed_url` in `spotify.rs`.
+
 ## Structure and verification
 
 - `src-tauri/src/spotify.rs`: Rust PKCE callback, saved-session restoration, token refresh and fixed-host API proxy. No bearer or refresh tokens reach the Tauri frontend.
 - `src-tauri/src/native_player.rs`: launches and supervises the hidden Soloist process, finds its Web API device, handles missing install/key, expiry and pairing errors, and kills it on exit.
 - `src-tauri/src/bin/player-probe.rs`: dev probe that plays one track on an already-running Rustify device using the saved login.
 - `src-tauri/src/credentials.rs`: platform credential stores and the WSL DPAPI bridge.
-- `src-tauri/src/lib.rs`: validated library storage, native import and Tauri commands.
+- `src-tauri/src/library.rs`: validated local library model and atomic storage.
+- `src-tauri/src/desktop.rs`: Tauri commands (native import, Spotify, player) and app startup.
+- `src/features/`: self-contained frontend features and the feature registry.
 - `src/`: vanilla frontend and local-file playback. Local files use the WebView's audio decoder; Spotify audio is played by Soloist.
 - `public/`: original artwork, demo recordings and library seed.
 - `tests/`: playback ordering and browser interaction tests, including explicitly mocked native IPC for Spotify contracts.
@@ -78,9 +103,8 @@ cargo check --manifest-path src-tauri/Cargo.toml --features desktop
 
 Playwright requires its Chromium install and Linux dependencies. For an existing compatible browser, set `CHROMIUM_PATH` to its executable. Browser Spotify tests use synthetic IPC responses; they do not verify live OAuth, Spotify service permissions or DRM playback.
 
-The 2026-11-13 design review record (screenshots and video) is still in the stax3 repo under `docs/design/reviews/rustify-2026-11-13/`.
 
-The current WSL workstation now has the system WebKitGTK prerequisites installed. Native startup, Rust IPC, persisted library round trips, bundled WAV decoding/seek/pause/next, and app-owned audio after a reload have been verified. The OS file-picker interaction and persisted audio across a complete process restart have not been automated.
+On WSL with the WebKitGTK prerequisites installed, native startup, Rust IPC, persisted library round trips, bundled WAV decoding/seek/pause/next, and app-owned audio after a reload have been verified. The OS file-picker interaction and persisted audio across a complete process restart have not been automated.
 
 For the real Linux WebKit smoke check, install `tauri-driver` (`cargo install tauri-driver --locked`) and the distribution's WebKit WebDriver package (`webkitgtk-webdriver` on this Ubuntu version; some distributions name it `webkit2gtk-driver`). Start `tauri-driver --native-driver /path/to/WebKitWebDriver` and run `node tests/native-smoke.mjs` from this directory. The script uses an existing native debug executable, temporarily changes the local library, restores the saved library in cleanup, and captures a screenshot. It tests a managed media file directly; it does not drive the OS picker.
 
@@ -105,14 +129,14 @@ Saved albums now have their own library view and save/remove actions. Library an
 
 ## Windows build from WSL
 
-The Windows executable is cross-compiled with `cargo-xwin`. This uses the MSVC SDK cached in `~/.cache/rustify-xwin`, plus clang/lld and `llvm-rc`. The tooling under `/tmp/rustify-windows-tools` is temporary and is lost on reboot.
+The Windows executable is cross-compiled with `cargo-xwin`. It needs the MSVC SDK (`cargo-xwin` downloads it into its cache), plus clang-cl, lld-link and `llvm-rc` on `PATH`.
 
 ```sh
 npm run build
 cd src-tauri
 cargo xwin build --release --target x86_64-pc-windows-msvc --features desktop,custom-protocol --bin spotify-rust
-# -> target/x86_64-pc-windows-msvc/release/spotify-rust.exe (copied to Desktop\Rustify\Rustify.exe)
+# -> target/x86_64-pc-windows-msvc/release/spotify-rust.exe (rename to Rustify.exe)
 ```
 
-Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 19/19. Playwright 31/32: the dialog focus-trap test fails only after the earlier tests run in the same headless shell (the window becomes inactive), and passes alone. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
+Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 21/21, Playwright 32/32 and Rust 17/17 passed. Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
 

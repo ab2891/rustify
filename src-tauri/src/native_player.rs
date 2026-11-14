@@ -42,7 +42,11 @@ pub fn home() -> Option<PathBuf> {
 }
 
 fn executable(home: &Path) -> PathBuf {
-    home.join("soloist").join(if cfg!(windows) { "soloist.exe" } else { "soloist" })
+    home.join("soloist").join(if cfg!(windows) {
+        "soloist.exe"
+    } else {
+        "soloist"
+    })
 }
 
 /// `SOLOIST_API_KEY` from the process environment or the local `.env` file.
@@ -94,7 +98,10 @@ impl NativePlayer {
                     guard.take();
                     if code.code() == Some(10) {
                         let e = expired();
-                        self.set(Status { error: Some(e.clone()), ..Status::default() });
+                        self.set(Status {
+                            error: Some(e.clone()),
+                            ..Status::default()
+                        });
                         return Err(e);
                     }
                     false
@@ -108,11 +115,17 @@ impl NativePlayer {
                 return Ok(id);
             }
         } else {
-            self.set(Status { starting: true, ..Status::default() });
+            self.set(Status {
+                starting: true,
+                ..Status::default()
+            });
             match launch() {
                 Ok(child) => *guard = Some(child),
                 Err(e) => {
-                    self.set(Status { error: Some(e.clone()), ..Status::default() });
+                    self.set(Status {
+                        error: Some(e.clone()),
+                        ..Status::default()
+                    });
                     return Err(e);
                 }
             }
@@ -120,7 +133,10 @@ impl NativePlayer {
         let result = find_device(&spotify, guard.as_mut().unwrap()).await;
         match result {
             Ok(id) => {
-                self.set(Status { device_id: Some(id.clone()), ..Status::default() });
+                self.set(Status {
+                    device_id: Some(id.clone()),
+                    ..Status::default()
+                });
                 Ok(id)
             }
             Err(e) => {
@@ -128,7 +144,10 @@ impl NativePlayer {
                     let _ = child.kill();
                     let _ = child.wait();
                 }
-                self.set(Status { error: Some(e.clone()), ..Status::default() });
+                self.set(Status {
+                    error: Some(e.clone()),
+                    ..Status::default()
+                });
                 Err(e)
             }
         }
@@ -149,7 +168,10 @@ fn launch() -> Result<Child, String> {
         ));
     }
     let key = api_key(&home).ok_or_else(|| {
-        format!("Add SOLOIST_API_KEY=... to {} to enable Spotify playback.", home.join(".env").display())
+        format!(
+            "Add SOLOIST_API_KEY=... to {} to enable Spotify playback.",
+            home.join(".env").display()
+        )
     })?;
     let mut command = Command::new(&exe);
     command

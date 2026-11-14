@@ -4,6 +4,8 @@ import { installPanelSizing } from "./layout.js";
 import { allCollectionTracks } from "./collections.js";
 import { sameRecording } from "./playback-match.js";
 import { Queue, formatTime, escapeHTML as h } from "./player.js";
+import { loadFeatures } from "./features/registry.js";
+import featureList from "./features/index.js";
 import {
   native,
   shuffleTracks,
@@ -107,7 +109,7 @@ const isSpotify = () => mode === "spotify";
 const api = async (method, path, body) => {
   const started = generation;
   if ((method === "PUT" || method === "POST") && path.startsWith("/me/player/") && !remote.deviceId) {
-    await ensurePlaybackDevice();
+    await features.devices.ensure();
     if (started !== generation) throw Object.assign(new Error("Source changed."), { stale: true });
     // The path was built before a device existed.
     const target = new URL(path, "https://api.spotify.com");
@@ -122,7 +124,7 @@ const api = async (method, path, body) => {
     if (!/No active Spotify device/.test(String(error)) || !["PUT", "POST"].includes(method) || !path.startsWith("/me/player/")) throw error;
     if (started !== generation) throw Object.assign(new Error("Source changed."), { stale: true });
     remote.deviceId = null;
-    await ensurePlaybackDevice();
+    await features.devices.ensure();
     if (started !== generation) throw Object.assign(new Error("Source changed."), { stale: true });
     const target = new URL(path, "https://api.spotify.com");
     target.searchParams.set("device_id", remote.deviceId);
@@ -1616,56 +1618,6 @@ function trackMenu(button, id) {
     `<button data-enqueue="${h(id)}">Add to queue</button><button data-add-playlist="${h(id)}">Add to playlist</button>${isSpotify() && trackById(id)?.artistId ? `<button data-route="artist" data-id="${h(trackById(id).artistId)}">Go to artist</button>` : ""}${isSpotify() && trackById(id)?.albumId ? `<button data-route="album" data-id="${h(trackById(id).albumId)}">Go to album</button>` : ""}<button data-like="${h(id)}">${liked(id) ? "Remove from" : "Add to"} Liked Songs</button>${route.type === "playlist" ? `<button data-remove-playlist-track="${h(id)}">Remove from this playlist</button>` : ""}`,
   );
 }
-let playerStarting = null;
-// Starts Rustify's built-in Spotify speaker (Spotify Soloist) and makes it the active device.
-async function startRustifyPlayer() {
-  if (playerStarting) return playerStarting;
-  const started = generation;
-  playerStarting = (async () => {
-    const deviceId = await spotify.startPlayer();
-    if (started !== generation || !isSpotify() || !connected()) throw Object.assign(new Error("Source changed."), { stale: true });
-    await api("PUT", "/me/player", { device_ids: [deviceId], play: false });
-    remote.deviceId = deviceId;
-    closeModal();
-    toast("Playing on Rustify. No Spotify app or browser needed.");
-  })().finally(() => { playerStarting = null; });
-  return playerStarting;
-}
-async function ensurePlaybackDevice() {
-  const started = generation;
-  const result = await spotify.request("GET", "/me/player/devices");
-  if (started !== generation) throw Object.assign(new Error("Source changed."), { stale: true });
-  const available = (result.devices || []).filter(d => d.id && !d.is_restricted);
-  const device = available.find(d => d.is_active);
-  if (device) remote.deviceId = device.id;
-  else await startRustifyPlayer();
-}
-async function openDevices() {
-  if (!isSpotify()) {
-    toast("Local audio plays on this computer.");
-    return;
-  }
-  if (!connected()) {
-    openConnect();
-    return;
-  }
-  const result = await api("GET", "/me/player/devices");
-  remote.devices = result.devices || [];
-  openModal(
-    "Connect to a device",
-    `<p>Play on this computer. No Spotify app or browser tab needed (Premium required).</p><button class="green-button" data-action="rustify-player">Play on this computer</button><p>Or select another Spotify device:</p>${
-      remote.devices
-        .filter((d) => d.id)
-        .map(
-          (d) =>
-            `<button class="playlist-pick" data-device="${h(d.id)}" ${d.is_restricted ? "disabled" : ""}>${icon("device")}<span>${h(d.name)}${d.is_active ? " · Listening here" : ""}${d.is_restricted ? " · Unavailable for control" : ""}</span></button>`,
-        )
-        .join("") ||
-      "<p>No other devices found.</p>"
-    }`,
-    `<button class="white-button" data-action="devices">Refresh devices</button>`,
-  );
-}
 async function search(more = false) {
   const sequence = ++searchSequence;
   if (!searchQuery.trim()) {
@@ -1875,15 +1827,6 @@ async function doAction(action, button) {
       renderTop();
       renderPlayer();
       break;
-    case "rustify-player":
-      button.disabled = true;
-      button.textContent = "Starting…";
-      try { await startRustifyPlayer(); }
-      finally { if (button.isConnected) { button.disabled = false; button.textContent = "Play on this computer"; } }
-      break;
-    case "devices":
-      await openDevices();
-      break;
     case "mute":
       if (isSpotify() && remote.state?.device?.supports_volume === false) {
         toast("This device controls its own volume.");
@@ -2023,6 +1966,11 @@ async function doAction(action, button) {
       closeModal();
       renderAll();
       break;
+    default: {
+      // Actions defined by feature modules (src/features/).
+      const run = features.action(action);
+      if (run) await run(button);
+    }
   }
 }
 async function importFiles(files) {
@@ -2045,6 +1993,30 @@ function handleError(error) {
   if (status) status.textContent = message;
   else toast(message, true);
 }
+// Context handed to feature modules. Getters keep reassigned state current.
+const featureContext = {
+  get generation() { return generation; },
+  get remote() { return remote; },
+  get mode() { return mode; },
+  get current() { return current; },
+  get library() { return library; },
+  isSpotify,
+  connected,
+  api,
+  spotify,
+  toast,
+  openModal,
+  closeModal,
+  openConnect,
+  renderAll,
+  navigate,
+  playTrack,
+  handleError,
+  h,
+  icon,
+  stale: () => Object.assign(new Error("Source changed."), { stale: true }),
+};
+const features = loadFeatures(featureList, featureContext);
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button,[data-track]");
   const existingMenu = document.querySelector(".context-menu");
@@ -2245,6 +2217,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || dialog) return;
+  if (features.shortcut(event)) return;
   if (event.key === "Enter" && event.target.dataset.track) {
     event.preventDefault();
     playTrack(event.target.dataset.track).catch(handleError);

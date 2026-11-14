@@ -1,0 +1,42 @@
+// Feature registry: lets each feature live in its own file under src/features/.
+//
+// A feature is `{ name, setup(ctx) }`. `setup` receives the app context (see
+// `ctx` in main.js) and returns any of:
+//   actions:   { "action-name": async (button) => {} }  // for data-action="action-name"
+//   shortcuts: [{ key: "d", ctrl?, shift?, alt?, run(event) }]
+//   ...anything else, exposed to the app as `features.<name>.<thing>`
+// Register new features in ./index.js. See ./template.js.
+export function loadFeatures(list, ctx) {
+  const actions = new Map();
+  const shortcuts = [];
+  const api = {};
+  for (const feature of list) {
+    const { actions: own = {}, shortcuts: keys = [], ...exports } = feature.setup(ctx) || {};
+    for (const [name, run] of Object.entries(own)) {
+      if (actions.has(name)) throw new Error(`Action "${name}" is defined twice (${feature.name}).`);
+      actions.set(name, run);
+    }
+    shortcuts.push(...keys);
+    api[feature.name] = exports;
+  }
+  return {
+    ...api,
+    /** Handler for a data-action name, or undefined. */
+    action: (name) => actions.get(name),
+    /** Runs the first matching shortcut; returns true when one handled the event. */
+    shortcut(event) {
+      if (/INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "")) return false;
+      const match = shortcuts.find(
+        (s) =>
+          s.key.toLowerCase() === event.key.toLowerCase() &&
+          !!s.ctrl === (event.ctrlKey || event.metaKey) &&
+          !!s.shift === event.shiftKey &&
+          !!s.alt === event.altKey,
+      );
+      if (!match) return false;
+      event.preventDefault();
+      match.run(event);
+      return true;
+    },
+  };
+}
