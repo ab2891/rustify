@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle,
 };
 
 const ID: &str = "rustify";
@@ -63,10 +63,16 @@ pub fn set_tooltip(app: &AppHandle, text: &str) {
     }
 }
 
+/// Shows the main window, reopening it first if it was unloaded in the tray.
 pub fn show_main(app: &AppHandle) {
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-        let _ = main.set_focus();
+    crate::background::wake(app, true, None);
+}
+
+pub fn tooltip(now: &media::NowPlaying) -> String {
+    if now.title.is_empty() {
+        "Rustify".to_string()
+    } else {
+        // Windows truncates tray tooltips at 127 characters.
+        format!("{} · {}", now.title, now.artist).chars().take(120).collect()
     }
 }

@@ -45,6 +45,60 @@ let current = null,
   previousVolume = 0.65;
 let generation = 0,
   librarySearchOpen = false;
+// True while a player slider is being dragged; polls must not move it.
+let scrubbing = false,
+  settleTimer;
+// Position is shown as position-at-a-timestamp + time since, capped at the
+// duration, instead of counting seconds, so a throttled timer cannot drift.
+let positionAnchor = null;
+/** Where the song is right now, in seconds (not rounded to the 1 s display tick). */
+function livePosition() {
+  if (!isSpotify()) return audio.currentTime || 0;
+  if (!playing || !positionAnchor) return elapsed;
+  return Math.min(duration || Infinity, positionAnchor.base + (Date.now() - positionAnchor.at) / 1000);
+}
+function anchorPosition() {
+  positionAnchor = { base: elapsed, at: Date.now(), shown: elapsed };
+}
+// Rows picked in the current song list (by row index):
+// click selects, Ctrl/Shift-click extends, double-click or Enter plays.
+const selection = new Set();
+let selectionAnchor = null;
+function clearSelection() {
+  selection.clear();
+  selectionAnchor = null;
+}
+function paintSelection() {
+  document.querySelectorAll(".content tr[data-track]").forEach((row) => {
+    const on = selection.has(Number(row.dataset.index));
+    row.classList.toggle("selected", on);
+    row.setAttribute("aria-selected", String(on));
+  });
+}
+function selectRow(row, event) {
+  const index = Number(row.dataset.index);
+  const extend = event.ctrlKey || event.metaKey;
+  if (event.shiftKey && selectionAnchor != null) {
+    if (!extend) selection.clear();
+    const [from, to] = [Math.min(selectionAnchor, index), Math.max(selectionAnchor, index)];
+    for (let i = from; i <= to; i++) selection.add(i);
+  } else {
+    if (extend) selection.has(index) ? selection.delete(index) : selection.add(index);
+    else {
+      selection.clear();
+      selection.add(index);
+    }
+    selectionAnchor = index;
+  }
+  paintSelection();
+}
+/** The selected songs in list order, or just `id` when it is not part of a multi-selection. */
+function selectedTracks(row) {
+  const list = viewTracks();
+  if (row && selection.size > 1 && selection.has(Number(row.dataset.index)))
+    return [...selection].sort((a, b) => a - b).map((i) => list[i]).filter(Boolean);
+  return row ? [trackById(row.dataset.track)].filter(Boolean) : [];
+}
 let libraryFilter = "all",
   librarySearch = "",
   librarySort = "recent",
@@ -85,7 +139,9 @@ function freshRemote() {
     deviceId: null,
     state: null,
     queue: [],
-    refreshing: false,
+    listContext: null,
+    refreshing: null,
+    refreshAgain: false,
     playbackEpoch: 0,
     pendingReshuffle: false,
     pendingSequential: null,
@@ -414,7 +470,33 @@ function renderContent() {
   const list = viewTracks();
   el.innerHTML =
     toolbar() +
-    `<div class="playlist-hero ${route.type === "liked" ? "liked-hero" : ""}">${route.type !== "liked" ? `<div class="hero-art-backdrop">${cover(info.cover)}</div>` : ""}${route.type === "liked" ? likedCover() : cover(info.cover, info.title)}<div><small>${h(info.kind)}</small><h1>${h(info.title)}</h1><p>${h(info.description || "")}<br><strong>${h(isSpotify() ? remote.profile?.display_name || "Your collection" : "Your collection")}</strong> · ${info.total ?? list.length} songs${list.length && list.length === (info.total ?? list.length) ? " · " + formatTime(list.reduce((n, t) => n + t.duration, 0)) : ""}</p></div></div><div class="content-body"><div class="playlist-actions"><button class="big-play" data-action="play-view" aria-label="Play ${h(info.title)}">${icon("play")}</button>${shuffleControls()}${isSpotify() && route.type === "album" ? `<button class="album-save ${remote.savedAlbums.get(route.id) ? "saved" : ""}" data-action="save-album" aria-label="${remote.savedAlbums.get(route.id) ? "Remove saved album" : "Save album"}">${icon(remote.savedAlbums.get(route.id) ? "check" : "plus")}</button>` : ""}${route.type === "playlist" ? ib("more", "Playlist options", "playlist-menu") : ""}<span style="flex:1"></span>${!isSpotify() ? '<button class="text-button" data-action="import">Import music</button>' : ""}</div>${list.length ? table(list) : empty("Find your next favorite", route.type === "liked" ? "Save songs with the heart button." : "Add songs from search or your collection.", "focus-search", "Search music")}${isSpotify() && (route.type === "liked" || route.type === "local" ? remote.moreLiked : remote.viewMore) ? '<button class="white-button load-more" data-action="more-tracks">Load more songs</button>' : ""}</div>`;
+    `<div class="playlist-hero ${route.type === "liked" ? "liked-hero" : ""}">${route.type !== "liked" ? `<div class="hero-art-backdrop">${cover(info.cover)}</div>` : ""}${route.type === "liked" ? likedCover() : cover(info.cover, info.title)}<div><small>${h(info.kind)}</small><h1>${h(info.title)}</h1><p>${h(info.description || "")}<br><strong>${h(isSpotify() ? remote.profile?.display_name || "Your collection" : "Your collection")}</strong> · ${info.total ?? list.length} songs${list.length && list.length === (info.total ?? list.length) ? " · " + formatTime(list.reduce((n, t) => n + t.duration, 0)) : ""}</p></div></div><div class="content-body"><div class="playlist-actions"><button class="big-play" data-action="play-view" data-title="${h(info.title)}" aria-label="${viewIsActive() && playing ? "Pause" : "Play"} ${h(info.title)}">${icon(viewIsActive() && playing ? "pause" : "play")}</button>${shuffleControls()}${isSpotify() && route.type === "album" ? `<button class="album-save ${remote.savedAlbums.get(route.id) ? "saved" : ""}" data-action="save-album" aria-label="${remote.savedAlbums.get(route.id) ? "Remove saved album" : "Save album"}">${icon(remote.savedAlbums.get(route.id) ? "check" : "plus")}</button>` : ""}${route.type === "playlist" ? ib("more", "Playlist options", "playlist-menu") : ""}<span style="flex:1"></span>${!isSpotify() ? '<button class="text-button" data-action="import">Import music</button>' : ""}</div>${list.length ? table(list) : empty("Find your next favorite", route.type === "liked" ? "Save songs with the heart button." : "Add songs from search or your collection.", "focus-search", "Search music")}${isSpotify() && (route.type === "liked" || route.type === "local" ? remote.moreLiked : remote.viewMore) ? '<button class="white-button load-more" data-action="more-tracks">Load more songs</button>' : ""}</div>`;
+}
+// Whether the open collection is the one playing. The play button then
+// pauses and resumes it instead of starting it again from the top.
+function viewIsActive() {
+  if (!current) return false;
+  if (!isSpotify())
+    return (
+      ["playlist", "album", "liked", "local"].includes(route.type) &&
+      localPlaybackContext === viewInfo().title &&
+      viewTracks().some((t) => t.id === current.id)
+    );
+  const sameCollection = (c) =>
+    c &&
+    (c.type === route.type ||
+      (["liked", "local"].includes(c.type) &&
+        ["liked", "local"].includes(route.type))) &&
+    (c.id || null) === (route.id || null);
+  if (remote.shuffleOrder.length) return sameCollection(remote.shuffleContext);
+  const uri = remote.state?.context?.uri;
+  if (route.type === "playlist" || route.type === "album")
+    return uri === `spotify:${route.type}:${route.id}`;
+  return (
+    !uri &&
+    sameCollection(remote.listContext) &&
+    remote.liked.includes(current.id)
+  );
 }
 function empty(title, description, action, label) {
   return `<div class="empty-state"><h2>${h(title)}</h2><p>${h(description)}</p>${action ? `<button class="white-button" data-action="${action}">${h(label)}</button>` : ""}</div>`;
@@ -484,7 +566,7 @@ function collectionDate(t) {
 function table(list) {
   const withDate =
     isSpotify() && ["liked", "local", "playlist"].includes(route.type);
-  return `<table class="track-table ${withDate ? "with-date" : ""}"><thead><tr><th class="number">#</th><th class="song-heading">Title</th><th class="album-heading">Album</th>${withDate ? '<th class="date-added">Date added</th>' : ""}<th class="duration-cell">${icon("clock")}</th><th class="actions-cell"><span class="hidden">Actions</span></th></tr></thead><tbody>${list.map((t, i) => `<tr class="${current?.id === t.id ? "playing" : ""}" data-track="${h(t.id)}" data-index="${i}" tabindex="0" draggable="${!isSpotify() && route.type === "playlist"}" aria-label="Play ${h(t.title)} by ${h(t.artist)}"><td class="number">${current?.id === t.id && playing ? "▸" : i + 1}</td><td><div class="song-cell">${cover(t.cover)}<span class="text"><strong class="song-title">${h(t.title)}</strong><span class="song-artist">${artistLink(t)}</span></span></div></td><td class="album-cell">${t.albumId ? `<button class="inline-link" data-route="album" data-id="${h(t.albumId)}">${h(t.album)}</button>` : h(t.album)}</td>${withDate ? `<td class="date-added">${collectionDate(t) && !Number.isNaN(Date.parse(collectionDate(t))) ? h(new Date(collectionDate(t)).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })) : "—"}</td>` : ""}<td class="duration-cell">${formatTime(t.duration)}</td><td class="actions-cell"><div class="row-actions"><button class="icon-button like-row ${liked(t.id) ? "active" : ""}" data-like="${h(t.id)}" aria-label="${liked(t.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(t.id) ? "check" : "plus")}</button><button class="icon-button" data-menu-track="${h(t.id)}" aria-label="Options for ${h(t.title)}">${icon("more")}</button></div></td></tr>`).join("")}</tbody></table>`;
+  return `<table class="track-table ${withDate ? "with-date" : ""}"><thead><tr><th class="number">#</th><th class="song-heading">Title</th><th class="album-heading">Album</th>${withDate ? '<th class="date-added">Date added</th>' : ""}<th class="duration-cell">${icon("clock")}</th><th class="actions-cell"><span class="hidden">Actions</span></th></tr></thead><tbody>${list.map((t, i) => `<tr class="${current?.id === t.id ? "playing" : ""}${selection.has(i) ? " selected" : ""}" data-track="${h(t.id)}" data-index="${i}" tabindex="0" aria-selected="${selection.has(i)}" draggable="${route.type === "playlist" || route.type === "liked" || route.type === "album" || route.type === "search" || route.type === "local"}" aria-label="Play ${h(t.title)} by ${h(t.artist)}"><td class="number">${current?.id === t.id && playing ? "▸" : i + 1}</td><td><div class="song-cell">${cover(t.cover)}<span class="text"><strong class="song-title">${h(t.title)}</strong><span class="song-artist">${artistLink(t)}</span></span></div></td><td class="album-cell">${t.albumId ? `<button class="inline-link" data-route="album" data-id="${h(t.albumId)}">${h(t.album)}</button>` : h(t.album)}</td>${withDate ? `<td class="date-added">${collectionDate(t) && !Number.isNaN(Date.parse(collectionDate(t))) ? h(new Date(collectionDate(t)).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })) : "—"}</td>` : ""}<td class="duration-cell">${formatTime(t.duration)}</td><td class="actions-cell"><div class="row-actions"><button class="icon-button like-row ${liked(t.id) ? "active" : ""}" data-like="${h(t.id)}" aria-label="${liked(t.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(t.id) ? "check" : "plus")}</button><button class="icon-button" data-menu-track="${h(t.id)}" aria-label="Options for ${h(t.title)}">${icon("more")}</button></div></td></tr>`).join("")}</tbody></table>`;
 }
 function renderSearch() {
   const el = document.querySelector(".content");
@@ -593,7 +675,7 @@ function renderPanel() {
     return;
   }
   el.innerHTML = current
-    ? `<div class="now-visual">${cover(current.cover, current.album, "now-cover")}<div class="now-shade"></div><div class="panel-title"><strong>Now playing</strong>${ib("close", "Close now playing", "close-panel")}</div><div class="now-title"><div><h2>${h(current.title)}</h2><p>${artistLink(current)}</p></div><button class="icon-button ${liked(current.id) ? "active" : ""}" data-like="${h(current.id)}" aria-label="${liked(current.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(current.id) ? "check" : "plus")}</button></div></div><div class="panel-details"><div class="info-card"><h3>${isSpotify() ? "Credits" : "About this recording"}</h3><strong>${artistLink(current)}</strong><p>${isSpotify() ? `Playing on ${h(remote.state?.device?.name || "your Spotify device")}.` : current.imported ? "Imported from your local files. Playback stays on this device." : "An original ambient recording, included with Rustify."}</p></div><div class="info-card"><div class="panel-title"><strong>Next in queue</strong><button class="text-button" data-action="queue">Open queue</button></div>${(() => {
+    ? `<div class="now-visual">${cover(current.coverLarge || current.cover, current.album, "now-cover")}<div class="now-shade"></div><div class="panel-title"><strong>Now playing</strong>${ib("close", "Close now playing", "close-panel")}</div><div class="now-title"><div><h2>${h(current.title)}</h2><p>${artistLink(current)}</p></div><button class="icon-button ${liked(current.id) ? "active" : ""}" data-like="${h(current.id)}" aria-label="${liked(current.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(current.id) ? "check" : "plus")}</button></div></div><div class="panel-details"><div class="info-card"><h3>${isSpotify() ? "Credits" : "About this recording"}</h3><strong>${artistLink(current)}</strong><p>${isSpotify() ? `Playing on ${h(remote.state?.device?.name || "your Spotify device")}.` : current.imported ? "Imported from your local files. Playback stays on this device." : "An original ambient recording, included with Rustify."}</p></div><div class="info-card lyrics-card"><div class="panel-title"><strong>Lyrics</strong><button class="text-button" data-action="lyrics-edit">${features?.lyrics.get(current) ? "Edit" : "Add lyrics"}</button></div>${features?.lyrics.get(current) ? `<p class="own-lyrics">${h(features.lyrics.text(current))}</p>` : "<p>Add your own lyrics for this song. The island shows them too.</p>"}</div><div class="info-card"><div class="panel-title"><strong>Next in queue</strong><button class="text-button" data-action="queue">Open queue</button></div>${(() => {
         const next = isSpotify()
           ? remote.queue[0]
           : trackById(queue.upcoming()[0]);
@@ -613,12 +695,21 @@ function renderPlayer() {
       ] || "off"
     : queue.repeat;
   const shuffle = trueShuffle;
-  document.querySelector(".player").innerHTML =
+  const bar = document.querySelector(".player");
+  const focused = bar.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  // Only sliders: they hold focus for keyboard use while the bar re-renders.
+  const refocus = focused?.matches('input[type="range"]')
+    ? `#${focused.id}`
+    : null;
+  bar.innerHTML =
     `<div class="current-track">${current ? `${cover(current.cover, current.album)}<button class="text" data-action="now-panel"><strong>${h(current.title)}</strong><small>${h(current.artist)}</small></button><button class="icon-button ${liked(current.id) ? "active" : ""}" data-like="${h(current.id)}" aria-label="${liked(current.id) ? "Remove from" : "Add to"} Liked Songs">${icon(liked(current.id) ? "check" : "plus")}</button>` : '<span class="muted" style="font-size:12px">Choose something to play</span>'}</div><div class="transport"><div class="transport-buttons">${ib("shuffle", "True shuffle", "shuffle", "", shuffle)}${ib("previous", "Previous track", "previous")}${ib(playing ? "pause" : "play", playing ? "Pause" : "Play", "play", "main-play")}${ib("next", "Next track", "next")}${ib("repeat", `Repeat: ${repeat}`, "repeat", "", repeat !== "off")}${repeat === "one" ? '<span style="position:absolute;font-size:9px;margin-left:210px;margin-top:-4px;pointer-events:none">1</span>' : ""}</div><div class="timeline"><span id="elapsed">${formatTime(elapsed)}</span><input id="seek" type="range" min="0" max="${Math.max(1, duration)}" step=".1" value="${elapsed}" aria-label="Seek playback" style="--pct:${duration ? (elapsed / duration) * 100 : 0}%"><span id="duration">${formatTime(duration)}</span></div></div><div class="player-extras">${ib("queue", "Show queue", "queue", "", panel === "queue")}${ib("device", "Connect to a device", "devices", "device-button", Boolean(isSpotify() && remote.state?.device))}${native ? ib("island", "Toggle floating island", "island", "island-button") : ""}<div class="volume-controls" style="display:flex;align-items:center">${ib(muted ? "muted" : "volume", muted ? "Unmute" : "Mute", "mute")}<input id="volume" ${isSpotify() && remote.state?.device?.supports_volume === false ? "disabled" : ""} type="range" min="0" max="100" value="${muted ? 0 : Math.round(audio.volume * 100)}" aria-label="Volume" style="--pct:${muted ? 0 : audio.volume * 100}%"></div>${ib("expand", "Toggle now playing", "now-panel", "expand-btn", panel === "now")}</div>`;
   document.querySelector(".device-status").textContent =
     isSpotify() && remote.state?.device
       ? `Listening on ${remote.state.device.name}`
       : "";
+  if (refocus) bar.querySelector(refocus)?.focus({ preventScroll: true });
   features?.notify("player", playerSnapshot());
 }
 // What is playing, for features (e.g. the island). Keep this stable.
@@ -626,6 +717,7 @@ function playerSnapshot() {
   return {
     title: current?.title || "",
     artist: current?.artist || "",
+    album: current?.album || "",
     cover: current?.cover || "",
     playing: Boolean(playing),
     elapsed,
@@ -635,7 +727,7 @@ function playerSnapshot() {
 }
 function updateTime() {
   const seek = document.querySelector("#seek");
-  if (seek && document.activeElement !== seek) {
+  if (seek && !scrubbing) {
     seek.max = Math.max(1, duration);
     seek.value = elapsed;
     seek.style.setProperty(
@@ -658,6 +750,7 @@ async function navigate(next, record = true) {
     historyIndex++;
   }
   route = next;
+  clearSelection();
   document.querySelector(".content").scrollTop = 0;
   renderLibrary();
   if (
@@ -709,11 +802,15 @@ async function fetchRemoteView(next, more = false) {
       "GET",
       `/playlists/${encodeURIComponent(next.id)}/items?limit=50&offset=${offset}`,
     );
+    // Episodes and unreadable entries are not shown, so remember where each
+    // shown song really sits in the playlist (needed to reorder it).
+    const entries = (data.items || [])
+      .map((entry, i) => ({ entry, position: offset + i }))
+      .filter(({ entry }) => entry.item?.type === "track" && entry.item.id);
     const items = cache(
-      data.items
-        ?.filter((i) => i.item?.type === "track")
-        .map((i) => ({ ...i.item, added_at: i.added_at })) || [],
+      entries.map(({ entry }) => ({ ...entry.item, added_at: entry.added_at })),
     );
+    const positions = entries.map(({ position }) => position);
     await checkSaved(items);
     if (sequence !== routeSequence) return;
     const dates = more
@@ -726,6 +823,7 @@ async function fetchRemoteView(next, more = false) {
     remote.addedDates.set(`playlist:${next.id}`, dates);
     remote.viewMeta = { ...meta, total: data.total };
     remote.viewTracks = more ? [...previousTracks, ...items] : items;
+    remote.viewPositions = more ? [...(remote.viewPositions || []), ...positions] : positions;
     remote.viewMore = Boolean(data.next);
     remote.viewOffset = offset + (data.items?.length || 0);
   } else {
@@ -805,7 +903,25 @@ async function toggleSavedAlbum() {
     `/me/library?uris=${encodeURIComponent(uri)}`,
   );
   remote.savedAlbums.set(id, !wasSaved);
-  await fetchAlbums();
+  const loaded = remote.albums.some((a) => a.id === id);
+  if (wasSaved) {
+    remote.albums = remote.albums.filter((a) => a.id !== id);
+    if (loaded) remote.albumOffset = Math.max(0, remote.albumOffset - 1);
+  } else if (!loaded && remote.viewMeta?.id === id) {
+    remote.albums = [
+      {
+        id,
+        album: remote.viewMeta.title,
+        artist: remote.viewMeta.description || "Unknown artist",
+        artistId: remote.viewMeta.artistId,
+        cover: remote.viewMeta.cover,
+        uri,
+      },
+      ...remote.albums,
+    ];
+    remote.albumOffset++;
+  }
+  renderLibrary();
   renderContent();
   toast(
     wasSaved
@@ -838,9 +954,26 @@ async function fetchLiked(more = false) {
   remote.likedOffset = offset + (data.items?.length || 0);
   renderLibrary();
 }
-async function refreshState(silent = true) {
-  if (!connected() || !isSpotify() || remote.refreshing) return;
-  remote.refreshing = true;
+function refreshState(silent = true) {
+  if (!connected() || !isSpotify()) return Promise.resolve();
+  const owner = remote;
+  if (owner.refreshing) {
+    // A read is already in flight and may predate what the caller just did:
+    // read once more when it returns instead of dropping this request.
+    owner.refreshAgain = true;
+    return owner.refreshing;
+  }
+  owner.refreshing = (async () => {
+    do {
+      owner.refreshAgain = false;
+      await readPlayerState(silent);
+    } while (owner.refreshAgain && owner === remote && connected() && isSpotify());
+  })().finally(() => {
+    owner.refreshing = null;
+  });
+  return owner.refreshing;
+}
+async function readPlayerState(silent) {
   try {
     const epoch = remote.playbackEpoch;
     const previousId = current?.id;
@@ -892,10 +1025,13 @@ async function refreshState(silent = true) {
       }
       playing = state.is_playing;
       elapsed = (state.progress_ms || 0) / 1000;
+      anchorPosition();
       duration = current.duration;
       remote.deviceId = state.device?.id;
       const volume = state.device?.volume_percent;
       if (volume != null) audio.volume = volume / 100;
+      // The last audible volume is kept behind a mute and restored on unmute.
+      if (volume) previousVolume = volume / 100;
       muted = volume === 0;
       await checkSaved([current]);
     } else {
@@ -904,14 +1040,34 @@ async function refreshState(silent = true) {
       elapsed = 0;
       duration = 0;
     }
-    if (!document.querySelector(".player input:focus")) renderPlayer();
+    if (!scrubbing) renderPlayer();
     renderPanel();
+    // Also when only the context changed: the collection's play button depends on it.
+    markPlayingRows();
     if (previousId !== current?.id || panel === "queue" || panel === "now")
       await refreshQueue();
   } catch (error) {
     if (!silent && !error.stale) toast(error, true);
-  } finally {
-    remote.refreshing = false;
+  }
+}
+// Moves the "now playing" row marker without re-rendering (and scrolling) the list.
+function markPlayingRows() {
+  for (const row of document.querySelectorAll(".content tr[data-track]")) {
+    const active = current?.id === row.dataset.track;
+    row.classList.toggle("playing", active);
+    const number = row.querySelector("td.number");
+    if (number)
+      number.textContent =
+        active && playing ? "▸" : String(Number(row.dataset.index) + 1);
+  }
+  const big = document.querySelector(".content .big-play");
+  if (big) {
+    const pausing = viewIsActive() && playing;
+    big.innerHTML = icon(pausing ? "pause" : "play");
+    big.setAttribute(
+      "aria-label",
+      `${pausing ? "Pause" : "Play"} ${big.dataset.title || ""}`,
+    );
   }
 }
 async function refreshQueue() {
@@ -920,10 +1076,19 @@ async function refreshQueue() {
   remote.queue = cache(result.queue || [],true);
   renderPanel();
 }
+// Spotify's player state lags a command by a moment. Reads requested before the
+// command are discarded, the first read waits briefly, and one more follows.
 async function playerCommand(method, path, body) {
+  const owner = remote;
+  remote.playbackEpoch++;
   await api(method, path, body);
+  remote.playbackEpoch++;
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (owner !== remote || !isSpotify()) return;
   await refreshState(false);
   if (panel === "queue") await refreshQueue();
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => refreshState(), 1200);
 }
 function deviceQuery() {
   return remote.deviceId
@@ -1291,6 +1456,10 @@ async function playTrack(id, list = viewTracks(), useContext = true) {
     remote.shuffleSource = [];
     remote.shuffleContext = null;
     remote.shuffleSeen.clear();
+    remote.listContext =
+      useContext && ["liked", "local"].includes(route.type)
+        ? { type: "liked" }
+        : null;
     let body;
     if (useContext && (route.type === "playlist" || route.type === "album"))
       body = {
@@ -1299,19 +1468,16 @@ async function playTrack(id, list = viewTracks(), useContext = true) {
       };
     else {
       const items = list.length ? list : [t];
-      const index = Math.max(
-        0,
-        items.findIndex((item) => item.id === id),
-      );
-      body = {
-        offset: { position: 0 },
-        uris: items
-          .slice(index)
-          .map((t) => t.uri)
-          .filter(Boolean),
-      };
-      if (!body.uris.includes(t.uri))
-        body = { uris: [t.uri], offset: { position: 0 } };
+      // Send the whole list and start at the chosen song, so Previous can
+      // reach the songs before it (Spotify plays a list the same way).
+      const uris = items
+        .filter((item) => item.uri && (item.available !== false || item.id === id))
+        .map((item) => item.uri);
+      const position = uris.indexOf(t.uri);
+      body =
+        position >= 0
+          ? { uris, offset: { position } }
+          : { uris: [t.uri], offset: { position: 0 } };
     }
     await playerCommand("PUT", `/me/player/play${deviceQuery()}`, body);
     return;
@@ -1348,11 +1514,26 @@ async function loadAndPlay(t) {
   await save();
   renderContent();
 }
+let lastSkip = 0;
 async function advance(previous = false, ended = false) {
+  if (!ended) {
+    if (Date.now() - lastSkip < 100) return;
+    lastSkip = Date.now();
+  }
   if (isSpotify()) {
     playSequence++;
     remote.pendingSequential = null;
     remote.pendingReshuffle = false;
+    // Like Spotify: Previous restarts the song once it is a few seconds in,
+    // or when there is nothing to go back to.
+    if (
+      previous &&
+      current &&
+      (elapsed > 3 || remote.state?.actions?.disallows?.skipping_prev)
+    ) {
+      await seekRemote(0);
+      return;
+    }
     await playerCommand(
       "POST",
       `/me/player/${previous ? "previous" : "next"}${deviceQuery()}`,
@@ -1374,6 +1555,19 @@ async function advance(previous = false, ended = false) {
     renderPlayer();
     renderPanel();
   }
+}
+async function seekRemote(seconds) {
+  // Reads requested before the seek would snap the bar back.
+  remote.playbackEpoch++;
+  elapsed = seconds;
+  updateTime();
+  await api(
+    "PUT",
+    `/me/player/seek?position_ms=${Math.round(seconds * 1000)}${remote.deviceId ? "&device_id=" + encodeURIComponent(remote.deviceId) : ""}`,
+  );
+  remote.playbackEpoch++;
+  elapsed = seconds;
+  updateTime();
 }
 async function togglePlay() {
   if (isSpotify()) {
@@ -1405,10 +1599,23 @@ async function togglePlay() {
         return;
       }
     }
-    await playerCommand(
-      "PUT",
-      `/me/player/${playing ? "pause" : "play"}${deviceQuery()}`,
-    );
+    // Show the new state at once; undo it if the command fails.
+    const wasPlaying = playing;
+    playing = !wasPlaying;
+    remote.playbackEpoch++;
+    renderPlayer();
+    markPlayingRows();
+    try {
+      await playerCommand(
+        "PUT",
+        `/me/player/${wasPlaying ? "pause" : "play"}${deviceQuery()}`,
+      );
+    } catch (error) {
+      playing = wasPlaying;
+      renderPlayer();
+      markPlayingRows();
+      throw error;
+    }
     return;
   }
   if (!current) {
@@ -1433,12 +1640,20 @@ async function toggleLike(id) {
       wasLiked ? "DELETE" : "PUT",
       `/me/library?uris=${encodeURIComponent(t.uri)}`,
     );
+    // Update what is loaded instead of re-reading page one: that dropped every
+    // further loaded page and could bring back Spotify's not-yet-updated list.
+    const loaded = remote.liked.includes(id);
     remote.liked = wasLiked
       ? remote.liked.filter((v) => v !== id)
-      : [id, ...remote.liked];
+      : [id, ...remote.liked.filter((v) => v !== id)];
     remote.saved.set(id, !wasLiked);
-    remote.likedTotal += wasLiked ? -1 : 1;
-    await fetchLiked();
+    remote.likedTotal = Math.max(0, remote.likedTotal + (wasLiked ? -1 : 1));
+    if (wasLiked ? loaded : !loaded)
+      remote.likedOffset = Math.max(0, remote.likedOffset + (wasLiked ? -1 : 1));
+    const dates = remote.addedDates.get("liked") || new Map();
+    if (wasLiked) dates.delete(id);
+    else dates.set(id, new Date().toISOString());
+    remote.addedDates.set("liked", dates);
     toast(wasLiked ? "Removed from Liked Songs" : "Added to Liked Songs");
   } else {
     library.liked = liked(id)
@@ -1450,9 +1665,7 @@ async function toggleLike(id) {
   renderPlayer();
   renderPanel();
   if (
-    route.type === "liked" ||
-    route.type === "search" ||
-    route.type === "playlist"
+    ["liked", "local", "search", "playlist", "album"].includes(route.type)
   )
     renderContent();
 }
@@ -1576,7 +1789,8 @@ async function savePlaylist(id) {
   if (created) await navigate({ type: "playlist", id: created.id });
   else renderContent();
 }
-function addToPlaylistDialog(id) {
+function addToPlaylistDialog(ids) {
+  const songs = [].concat(ids).join(",");
   openModal(
     "Add to playlist",
     `${
@@ -1584,7 +1798,7 @@ function addToPlaylistDialog(id) {
         ? playlists()
             .map(
               (p) =>
-                `<button class="playlist-pick" data-add-to="${h(p.id)}" data-song="${h(id)}">${cover(p.cover)}<span>${h(p.title)}</span></button>`,
+                `<button class="playlist-pick" data-add-to="${h(p.id)}" data-song="${h(songs)}">${cover(p.cover)}<span>${h(p.title)}</span></button>`,
             )
             .join("")
         : "<p>Create a playlist first.</p>"
@@ -1592,18 +1806,21 @@ function addToPlaylistDialog(id) {
     `<button class="white-button" data-action="create-playlist">New playlist</button>`,
   );
 }
-async function addToPlaylist(playlistId, trackId) {
-  const t = trackById(trackId);
-  if (!t) return;
-  if (isSpotify())
-    await api("POST", `/playlists/${encodeURIComponent(playlistId)}/items`, {
-      uris: [t.uri],
-    });
-  else {
+async function addToPlaylist(playlistId, trackIds) {
+  const list = [].concat(trackIds).map((id) => trackById(id)).filter(Boolean);
+  if (!list.length) return;
+  if (isSpotify()) {
+    // Spotify accepts at most 100 songs per request.
+    for (let i = 0; i < list.length; i += 100)
+      await api("POST", `/playlists/${encodeURIComponent(playlistId)}/items`, {
+        uris: list.slice(i, i + 100).map((t) => t.uri),
+      });
+  } else {
     const p = library.playlists.find((p) => p.id === playlistId);
-    if (!p.track_ids.includes(trackId)) {
-      p.track_ids.push(trackId);
-      p.cover = p.track_ids.length === 1 ? t.cover : p.cover;
+    const fresh = list.filter((t) => !p.track_ids.includes(t.id));
+    if (fresh.length) {
+      if (!p.track_ids.length) p.cover = fresh[0].cover;
+      p.track_ids.push(...fresh.map((t) => t.id));
       await save();
     }
   }
@@ -1613,7 +1830,62 @@ async function addToPlaylist(playlistId, trackId) {
     if (isSpotify()) await fetchRemoteView(route);
     renderContent();
   }
-  toast("Added to playlist");
+  toast(list.length > 1 ? `Added ${list.length} songs to playlist` : "Added to playlist");
+}
+async function enqueueTracks(list) {
+  for (const t of list) {
+    if (isSpotify())
+      await api("POST", `/me/player/queue?uri=${encodeURIComponent(t.uri)}`);
+    else {
+      queue.enqueue(t.id);
+      if (!current) {
+        queue.start([t.id]);
+        await loadAndPlay(t);
+      }
+    }
+  }
+  if (isSpotify()) await refreshQueue();
+  renderPanel();
+  toast(list.length > 1 ? `Added ${list.length} songs to queue` : "Added to queue");
+}
+async function removeFromPlaylist(list) {
+  if (isSpotify()) {
+    await api("DELETE", `/playlists/${encodeURIComponent(route.id)}/items`, {
+      items: list.map((t) => ({ uri: t.uri })),
+    });
+    await fetchRemoteView(route);
+  } else {
+    const gone = new Set(list.map((t) => t.id));
+    const p = library.playlists.find((p) => p.id === route.id);
+    p.track_ids = p.track_ids.filter((id) => !gone.has(id));
+    await save();
+  }
+  clearSelection();
+  renderContent();
+  toast(list.length > 1 ? `Removed ${list.length} songs from playlist` : "Removed from playlist");
+}
+// Moves one song inside the open Spotify playlist (the same call the Spotify
+// app makes when a row is dragged).
+async function reorderRemote(from, to) {
+  if (from === to || !remote.viewTracks[from] || !remote.viewTracks[to]) return;
+  const positions = remote.viewPositions || [];
+  const body = {
+    range_start: positions[from] ?? from,
+    insert_before: (positions[to] ?? to) + (to > from ? 1 : 0),
+    range_length: 1,
+  };
+  const [moved] = remote.viewTracks.splice(from, 1);
+  remote.viewTracks.splice(to, 0, moved);
+  clearSelection();
+  renderContent();
+  try {
+    await api("PUT", `/playlists/${encodeURIComponent(route.id)}/items`, body);
+  } catch (error) {
+    // Not allowed (someone else's playlist) or failed: show Spotify's order again.
+    await fetchRemoteView(route).catch(() => {});
+    renderContent();
+    throw error;
+  }
 }
 function contextMenu(button, items) {
   document.querySelector(".context-menu")?.remove();
@@ -1628,9 +1900,18 @@ function contextMenu(button, items) {
   menu.querySelector("button")?.focus();
 }
 function trackMenu(button, id) {
+  const row = button.closest?.("tr[data-track]") || button.row;
+  const many = selectedTracks(row).length;
+  if (many > 1) {
+    contextMenu(
+      button,
+      `<button data-selection="queue">Add ${many} songs to queue</button><button data-selection="playlist">Add ${many} songs to playlist</button>${route.type === "playlist" ? `<button data-selection="remove">Remove ${many} songs from this playlist</button>` : ""}`,
+    );
+    return;
+  }
   contextMenu(
     button,
-    `<button data-enqueue="${h(id)}">Add to queue</button><button data-add-playlist="${h(id)}">Add to playlist</button>${isSpotify() && trackById(id)?.artistId ? `<button data-route="artist" data-id="${h(trackById(id).artistId)}">Go to artist</button>` : ""}${isSpotify() && trackById(id)?.albumId ? `<button data-route="album" data-id="${h(trackById(id).albumId)}">Go to album</button>` : ""}<button data-like="${h(id)}">${liked(id) ? "Remove from" : "Add to"} Liked Songs</button>${route.type === "playlist" ? `<button data-remove-playlist-track="${h(id)}">Remove from this playlist</button>` : ""}`,
+    `<button data-enqueue="${h(id)}">Add to queue</button><button data-add-playlist="${h(id)}">Add to playlist</button>${isSpotify() && trackById(id)?.artistId ? `<button data-route="artist" data-id="${h(trackById(id).artistId)}">Go to artist</button>` : ""}${isSpotify() && trackById(id)?.albumId ? `<button data-route="album" data-id="${h(trackById(id).albumId)}">Go to album</button>` : ""}<button data-like="${h(id)}">${liked(id) ? "Remove from" : "Add to"} Liked Songs</button><button data-action="lyrics-edit" data-id="${h(id)}">${features?.lyrics.get(trackById(id)) ? "Edit lyrics" : "Add lyrics"}</button>${route.type === "playlist" ? `<button data-remove-playlist-track="${h(id)}">Remove from this playlist</button>` : ""}`,
   );
 }
 async function search(more = false) {
@@ -1767,6 +2048,10 @@ async function doAction(action, button) {
       await togglePlay();
       break;
     case "play-view": {
+      if (viewIsActive()) {
+        await togglePlay();
+        break;
+      }
       playSequence++;
       remote.pendingSequential = null;
       remote.pendingReshuffle = false;
@@ -2010,7 +2295,21 @@ function handleError(error) {
 }
 // No browser context menu (Back/Reload/Inspect) except in text fields.
 document.addEventListener("contextmenu", (event) => {
-  if (!event.target.closest?.("input, textarea")) event.preventDefault();
+  if (event.target.closest?.("input, textarea")) return;
+  event.preventDefault();
+  // Right-click a song: its menu opens at the pointer (for the whole selection
+  // when the song is part of one).
+  const row = event.target.closest?.(".content tr[data-track]");
+  if (!row) return;
+  if (!selection.has(Number(row.dataset.index))) selectRow(row, { });
+  const at = { left: event.clientX, bottom: event.clientY };
+  trackMenu({ row, getBoundingClientRect: () => at }, row.dataset.track);
+});
+// Double-click plays; a single click only selects.
+document.addEventListener("dblclick", (event) => {
+  const row = event.target.closest?.("tr[data-track]");
+  if (!row || event.target.closest("button")) return;
+  playTrack(row.dataset.track).catch(handleError);
 });
 // Context handed to feature modules. Getters keep reassigned state current.
 const featureContext = {
@@ -2018,6 +2317,9 @@ const featureContext = {
   get remote() { return remote; },
   get mode() { return mode; },
   get current() { return current; },
+  get playing() { return Boolean(playing); },
+  get trueShuffle() { return trueShuffle; },
+  get features() { return features; },
   get library() { return library; },
   isSpotify,
   connected,
@@ -2030,6 +2332,10 @@ const featureContext = {
   renderAll,
   navigate,
   playTrack,
+  trackById,
+  position: livePosition,
+  seekTo: (seconds) => seekBy(seconds - elapsed),
+  refreshLyrics: () => { features.island.refreshLyrics(); renderPanel(); },
   handleError,
   doAction,
   openSettings,
@@ -2063,42 +2369,19 @@ document.addEventListener("click", async (event) => {
       await toggleLike(button.dataset.like);
     } else if (button.dataset.menuTrack)
       trackMenu(button, button.dataset.menuTrack);
-    else if (button.dataset.enqueue) {
-      const t = trackById(button.dataset.enqueue);
-      if (isSpotify()) {
-        await api("POST", `/me/player/queue?uri=${encodeURIComponent(t.uri)}`);
-        await refreshQueue();
-      } else {
-        queue.enqueue(t.id);
-        if (!current) {
-          queue.start([t.id]);
-          await loadAndPlay(t);
-        }
-      }
-      renderPanel();
-      toast("Added to queue");
+    else if (button.dataset.selection) {
+      const list = selectedTracks(document.querySelector(".content tr.selected"));
+      if (button.dataset.selection === "queue") await enqueueTracks(list);
+      else if (button.dataset.selection === "playlist") addToPlaylistDialog(list.map((t) => t.id));
+      else await removeFromPlaylist(list);
+    } else if (button.dataset.enqueue) {
+      await enqueueTracks([trackById(button.dataset.enqueue)]);
     } else if (button.dataset.addPlaylist)
       addToPlaylistDialog(button.dataset.addPlaylist);
     else if (button.dataset.addTo)
-      await addToPlaylist(button.dataset.addTo, button.dataset.song);
+      await addToPlaylist(button.dataset.addTo, button.dataset.song.split(","));
     else if (button.dataset.removePlaylistTrack) {
-      if (isSpotify()) {
-        const t = trackById(button.dataset.removePlaylistTrack);
-        await api(
-          "DELETE",
-          `/playlists/${encodeURIComponent(route.id)}/items`,
-          { items: [{ uri: t.uri }] },
-        );
-        await fetchRemoteView(route);
-      } else {
-        const p = library.playlists.find((p) => p.id === route.id);
-        p.track_ids = p.track_ids.filter(
-          (id) => id !== button.dataset.removePlaylistTrack,
-        );
-        await save();
-      }
-      renderContent();
-      toast("Removed from playlist");
+      await removeFromPlaylist([trackById(button.dataset.removePlaylistTrack)]);
     } else if (button.dataset.device) {
       await api("PUT", "/me/player", {
         device_ids: [button.dataset.device],
@@ -2130,7 +2413,7 @@ document.addEventListener("click", async (event) => {
       const index = Number(button.dataset.queueRemove);
       queue.removeUpcoming(index);
       renderPanel();
-    } else if (button.dataset.track) await playTrack(button.dataset.track);
+    } else if (button.dataset.track) selectRow(button, event);
     if (existingMenu?.contains(button)) existingMenu.remove();
   } catch (error) {
     handleError(error);
@@ -2185,14 +2468,13 @@ document.addEventListener("change", async (event) => {
     }
     if (event.target.id === "seek") {
       const seconds = Number(event.target.value);
-      if (isSpotify())
-        await api(
-          "PUT",
-          `/me/player/seek?position_ms=${Math.round(seconds * 1000)}`,
-        );
-      else audio.currentTime = seconds;
-      elapsed = seconds;
-      updateTime();
+      scrubbing = false;
+      if (isSpotify()) await seekRemote(seconds);
+      else {
+        audio.currentTime = seconds;
+        elapsed = seconds;
+        updateTime();
+      }
     }
     if (event.target.id === "volume") {
       if (isSpotify() && remote.state?.device?.supports_volume === false) {
@@ -2248,50 +2530,131 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "Space" && event.target.tagName !== "BUTTON") {
     event.preventDefault();
     togglePlay().catch(handleError);
+    return;
   }
-  if (event.key.toLowerCase() === "m") doAction("mute").catch(handleError);
-  if (event.altKey && event.shiftKey && event.key.toLowerCase() === "q")
-    doAction("queue").catch(handleError);
-  if ((event.ctrlKey || event.metaKey) && event.key === "ArrowRight") {
-    event.preventDefault();
-    advance().catch(handleError);
-  }
-  if ((event.ctrlKey || event.metaKey) && event.key === "ArrowLeft") {
-    event.preventDefault();
-    advance(true).catch(handleError);
-  }
+  const combo = `${event.ctrlKey || event.metaKey ? "mod+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`;
+  const run = SHORTCUTS[combo];
+  if (!run) return;
+  event.preventDefault();
+  // Held keys act at most once per 100 ms.
+  if (event.repeat && Date.now() - lastShortcut < 100) return;
+  lastShortcut = Date.now();
+  Promise.resolve()
+    .then(run)
+    .catch(handleError);
 });
-let dragId, dragIndex;
+let lastShortcut = 0;
+async function seekBy(seconds) {
+  if (!current) return;
+  const target = Math.max(0, Math.min(duration || 0, elapsed + seconds));
+  if (isSpotify()) await seekRemote(target);
+  else {
+    audio.currentTime = target;
+    elapsed = target;
+    updateTime();
+  }
+}
+async function changeVolume(delta) {
+  if (isSpotify() && remote.state?.device?.supports_volume === false) {
+    toast("This device controls its own volume.");
+    return;
+  }
+  audio.volume = Math.max(0, Math.min(1, Math.round((audio.volume + delta) * 100) / 100));
+  audio.muted = false;
+  muted = audio.volume === 0;
+  if (audio.volume) previousVolume = audio.volume;
+  localStorage.setItem("rustify-volume", audio.volume);
+  renderPlayer();
+  if (isSpotify() && connected())
+    await api(
+      "PUT",
+      `/me/player/volume?volume_percent=${Math.round(audio.volume * 100)}`,
+    );
+}
+// Keyboard shortcuts (the familiar desktop music-player set), plus M for mute.
+const SHORTCUTS = {
+  "mod+arrowright": () => advance(),
+  "mod+arrowleft": () => advance(true),
+  "shift+arrowright": () => seekBy(5),
+  "shift+arrowleft": () => seekBy(-5),
+  "mod+arrowup": () => changeVolume(0.1),
+  "mod+arrowdown": () => changeVolume(-0.1),
+  "mod+s": () => doAction("shuffle"),
+  "mod+r": () => doAction("repeat"),
+  "alt+arrowleft": () => doAction("back"),
+  "alt+arrowright": () => doAction("forward"),
+  "mod+alt+arrowleft": () => doAction("back"),
+  "mod+alt+arrowright": () => doAction("forward"),
+  "mod+l": () => document.querySelector("#global-search")?.focus(),
+  "mod+n": () => doAction("create-playlist"),
+  "mod+,": () => doAction("settings"),
+  "alt+shift+b": () => (current ? toggleLike(current.id) : null),
+  "alt+shift+q": () => doAction("queue"),
+  "alt+shift+r": () => doAction("now-panel"),
+  "alt+shift+j": () => (panel === "now" ? null : doAction("now-panel")),
+  "alt+shift+s": () =>
+    isSpotify() && !connected() ? openConnect() : navigate({ type: "liked" }),
+  "alt+shift+h": () => navigate({ type: "home" }),
+  "alt+shift+d": () => doAction("devices"),
+  "alt+shift+l": () => doAction("collapse-library"),
+  m: () => doAction("mute"),
+};
+// A slider keeps keyboard focus after a click, so "focused" cannot mean
+// "being dragged": that froze the seek bar and the whole player bar.
+document.addEventListener("pointerdown", (event) => {
+  if (event.target.closest?.('.player input[type="range"]')) scrubbing = true;
+});
+for (const name of ["pointerup", "pointercancel"])
+  document.addEventListener(name, () => {
+    // After the slider's own change event. Dropping focus keeps Space and M
+    // working as play/pause and mute once the mouse lets go.
+    if (scrubbing)
+      setTimeout(() => {
+        scrubbing = false;
+        const active = document.activeElement;
+        if (active?.matches?.('.player input[type="range"]')) active.blur();
+      }, 0);
+  });
+// Drag a song onto a playlist in the library to add it (a multi-selection
+// goes together), or onto another row of the open playlist to move it.
+let dragId, dragIndex, dragIds;
 document.addEventListener("dragstart", (event) => {
   const row = event.target.closest("[data-track]");
-  if (row && !isSpotify()) {
-    dragId = row.dataset.track;
-    dragIndex = Number(row.dataset.index);
-    event.dataTransfer.setData("text/plain", dragId);
-  }
+  if (!row) return;
+  dragId = row.dataset.track;
+  dragIndex = Number(row.dataset.index);
+  dragIds = selectedTracks(row).map((t) => t.id);
+  event.dataTransfer.setData("text/plain", dragId);
 });
 document.addEventListener("dragover", (event) => {
+  if (!dragId) return;
   if (
-    !isSpotify() &&
-    (event.target.closest("[data-drop-playlist]") ||
-      event.target.closest("[data-track]"))
+    event.target.closest("[data-drop-playlist]") ||
+    (route.type === "playlist" && event.target.closest("tr[data-track]"))
   ) {
     event.preventDefault();
   }
 });
+document.addEventListener("dragend", () => {
+  dragId = null;
+});
 document.addEventListener("drop", (event) => {
   const p = event.target.closest("[data-drop-playlist]");
-  const row = event.target.closest("[data-track]");
-  if (!dragId || isSpotify()) return;
+  const row = event.target.closest("tr[data-track]");
+  if (!dragId) return;
   event.preventDefault();
   if (p) {
-    addToPlaylist(p.dataset.dropPlaylist, dragId).catch(handleError);
+    addToPlaylist(p.dataset.dropPlaylist, dragIds).catch(handleError);
   } else if (row && route.type === "playlist") {
-    const p = library.playlists.find((p) => p.id === route.id);
     const to = Number(row.dataset.index);
-    p.track_ids.splice(dragIndex, 1);
-    p.track_ids.splice(to, 0, dragId);
-    save().then(renderContent).catch(handleError);
+    if (isSpotify()) reorderRemote(dragIndex, to).catch(handleError);
+    else if (to !== dragIndex) {
+      const p = library.playlists.find((p) => p.id === route.id);
+      p.track_ids.splice(dragIndex, 1);
+      p.track_ids.splice(to, 0, dragId);
+      clearSelection();
+      save().then(renderContent).catch(handleError);
+    }
   }
   dragId = null;
 });
@@ -2299,11 +2662,13 @@ audio.addEventListener("play", () => {
   if (isSpotify()) return;
   playing = true;
   renderPlayer();
+  markPlayingRows();
 });
 audio.addEventListener("pause", () => {
   if (isSpotify()) return;
   playing = false;
   renderPlayer();
+  markPlayingRows();
 });
 audio.addEventListener("loadedmetadata", () => {
   if (isSpotify()) return;
@@ -2335,18 +2700,30 @@ audio.addEventListener("error", () => {
   }
 });
 const poll = setInterval(() => {
-  if (
-    isSpotify() &&
-    connected() &&
-    !document.hidden &&
-    !document.querySelector(".modal")
-  )
+  // Keep polling while the window is hidden in the tray: the island, media
+  // keys and the sleep timer still need the current song.
+  if (isSpotify() && connected() && !document.querySelector(".modal"))
     refreshState();
 }, 5000);
+let endCheckedFor = null;
 const tick = setInterval(() => {
+  if (!isSpotify() || !playing) positionAnchor = null;
   if (isSpotify() && playing) {
-    elapsed = Math.min(duration, elapsed + 1);
+    // Re-anchor when playback just resumed or the position was set elsewhere.
+    if (!positionAnchor || positionAnchor.shown !== elapsed) anchorPosition();
+    elapsed = Math.min(
+      duration,
+      positionAnchor.base + (Date.now() - positionAnchor.at) / 1000,
+    );
+    positionAnchor.shown = elapsed;
     updateTime();
+    // The song just ended: ask for the next one now, not at the next poll.
+    if (duration > 0 && elapsed >= duration) {
+      if (endCheckedFor !== current?.id && connected()) {
+        endCheckedFor = current?.id;
+        setTimeout(() => refreshState(), 400);
+      }
+    } else endCheckedFor = null;
   }
 }, 1000);
 window.addEventListener("beforeunload", () => {

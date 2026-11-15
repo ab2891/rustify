@@ -16,24 +16,41 @@ pub const LABEL: &str = "island";
 const WIDTH: f64 = 380.0;
 const HEIGHT: f64 = 68.0;
 const COMPACT: f64 = 68.0;
-/// Must match `additionalBrowserArgs` in tauri.conf.json: WebView2 refuses a
-/// second window with different arguments. HardwareMediaKeyHandling is off so
+/// Extra height for the lyrics dropdown under the pill.
+const LYRICS: f64 = 150.0;
+/// Both windows must use the same arguments (see `browser_args`): WebView2
+/// refuses a second window with different ones. HardwareMediaKeyHandling is off so
 /// only Rustify's own media session (media.rs) appears in Windows.
-pub const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling";
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling";
+/// Low memory mode (Settings): no separate graphics process. Pages are drawn
+/// on the CPU, which saves memory and leaves the graphics card to games.
+pub static LOW_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// WebView2 arguments shared by the main window and the island.
+pub fn browser_args() -> String {
+    if LOW_MEMORY.load(std::sync::atomic::Ordering::Relaxed) {
+        format!("{BROWSER_ARGS} --disable-gpu --in-process-gpu")
+    } else {
+        BROWSER_ARGS.to_string()
+    }
+}
 
 /// User options from Settings, applied when the island opens and when changed.
 #[derive(Clone, Copy, Default, serde::Deserialize)]
 pub struct Options {
     pub compact: bool,
     pub click_through: bool,
+    /// The lyrics dropdown is open (ignored in compact mode).
+    #[serde(default)]
+    pub lyrics: bool,
 }
-pub static OPTIONS: Mutex<Options> = Mutex::new(Options { compact: false, click_through: false });
+pub static OPTIONS: Mutex<Options> =
+    Mutex::new(Options { compact: false, click_through: false, lyrics: false });
 
 fn size(options: Options) -> tauri::LogicalSize<f64> {
     if options.compact {
         tauri::LogicalSize::new(COMPACT, COMPACT)
     } else {
-        tauri::LogicalSize::new(WIDTH, HEIGHT)
+        tauri::LogicalSize::new(WIDTH, if options.lyrics { HEIGHT + LYRICS } else { HEIGHT })
     }
 }
 
@@ -63,7 +80,7 @@ pub fn toggle(app: &AppHandle, data_dir: PathBuf) -> Result<bool, String> {
     let initial = size(options);
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("island.html".into()))
         .title("Rustify island")
-        .additional_browser_args(BROWSER_ARGS)
+        .additional_browser_args(&browser_args())
         .inner_size(initial.width, initial.height)
         .resizable(false)
         .decorations(false)
@@ -109,13 +126,8 @@ pub fn toggle(app: &AppHandle, data_dir: PathBuf) -> Result<bool, String> {
 
 /// Brings the main Rustify window to the front.
 pub fn show_main(app: &AppHandle) -> Result<(), String> {
-    let main = app
-        .get_webview_window("main")
-        .ok_or("Main window not found.")?;
-    let _ = main.unminimize();
-    main.show()
-        .and_then(|_| main.set_focus())
-        .map_err(|e| e.to_string())
+    crate::background::wake(app, true, None);
+    Ok(())
 }
 
 fn saved(file: &PathBuf) -> Option<PhysicalPosition<i32>> {

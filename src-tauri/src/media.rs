@@ -1,6 +1,7 @@
 //! Windows media controls: media keys, the volume flyout and the lock screen
 //! show what Rustify is playing and control it. Commands reach the frontend as
-//! `media-command` events (the same channel the tray and hotkeys use).
+//! `media-command` events (the same channel the tray and hotkeys use), or go
+//! to `background` while the page is unloaded in the tray.
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
 
@@ -19,7 +20,7 @@ pub struct NowPlaying {
 /// "show" brings the window up natively; everything else goes to the frontend.
 pub fn command_or_show(app: &AppHandle, name: &str) {
     if name == "show" {
-        crate::tray::show_main(app);
+        crate::background::wake(app, true, None);
     } else {
         command(app, name);
     }
@@ -28,6 +29,15 @@ pub fn command_or_show(app: &AppHandle, name: &str) {
 /// Sends a command to the main window: play, pause, toggle, next, previous,
 /// island, or show.
 pub fn command(app: &AppHandle, name: &str) {
+    use tauri::Manager;
+    if app.get_webview_window("main").is_some() {
+        emit(app, name);
+    } else {
+        crate::background::command(app, name);
+    }
+}
+
+pub fn emit(app: &AppHandle, name: &str) {
     let _ = app.emit_to("main", "media-command", name);
 }
 
@@ -39,7 +49,6 @@ mod platform {
         PlatformConfig,
     };
     use std::{cell::RefCell, time::Duration};
-    use tauri::Manager;
 
     thread_local! {
         // SMTC lives on the main (UI) thread; every call is marshalled there.
@@ -47,12 +56,35 @@ mod platform {
     }
 
     pub fn init(app: &AppHandle) -> Result<(), String> {
-        let window = app.get_webview_window("main").ok_or("main window missing")?;
-        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        // Windows ties media controls to a window. They use a hidden window of
+        // their own, so they keep working while the main window is unloaded.
+        // Created here on the UI thread, whose message loop serves it.
+        use windows_sys::Win32::UI::WindowsAndMessaging::CreateWindowExW;
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let title: Vec<u16> = "Rustify media controls\0".encode_utf16().collect();
+        let hwnd = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                title.as_ptr(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        if hwnd.is_null() {
+            return Err("could not create the media controls window".into());
+        }
         let mut controls = MediaControls::new(PlatformConfig {
             display_name: "Rustify",
             dbus_name: "rustify",
-            hwnd: Some(hwnd.0 as _),
+            hwnd: Some(hwnd as _),
         })
         .map_err(|e| format!("{e:?}"))?;
         let handle = app.clone();

@@ -1,9 +1,9 @@
 //! Tauri commands and app startup. To add a feature: write a `#[tauri::command]`
 //! here (or in a new module) and register it in `run()`'s `generate_handler!`.
 use crate::{
-    credentials, hotkeys, island,
+    background, credentials, hotkeys, island,
     library::{load_library, save_library, Library, Track},
-    media, native_player, shuffle, spotify, tray,
+    lyrics, media, native_player, shuffle, spotify, tray,
 };
 use std::{fs, path::PathBuf};
 use tauri::{Manager, State};
@@ -62,25 +62,69 @@ async fn import_tracks(app: tauri::AppHandle) -> Result<Vec<Track>, String> {
             let id = format!("local-{:032x}", rand::random::<u128>());
             let dest = media.join(format!("{id}.{ext}"));
             fs::copy(&source, &dest).map_err(|e| e.to_string())?;
+            let tags = read_tags(&dest, &media, &id);
             tracks.push(Track {
-                id,
-                title: source
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-                artist: "Local artist".into(),
-                album: "Local files".into(),
-                duration: 0.,
+                title: tags.title.unwrap_or_else(|| {
+                    source
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                }),
+                artist: tags.artist.unwrap_or_else(|| "Local artist".into()),
+                album: tags.album.unwrap_or_else(|| "Local files".into()),
+                duration: tags.duration,
                 src: dest.to_string_lossy().into_owned(),
-                cover: "/art/local.svg".into(),
+                cover: tags.cover.unwrap_or_else(|| "/art/local.svg".into()),
                 imported: true,
+                id,
             });
         }
         Ok(tracks)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+#[derive(Default)]
+struct Tags {
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: f64,
+    /// Path of the embedded cover, saved next to the audio as `<id>.cover.<ext>`.
+    cover: Option<String>,
+}
+/// Title, artist, album, length and cover embedded in an audio file. Files
+/// without readable tags give an empty result (the filename is used instead).
+fn read_tags(file: &std::path::Path, media: &std::path::Path, id: &str) -> Tags {
+    use lofty::{file::{AudioFile, TaggedFileExt}, picture::MimeType, tag::Accessor};
+    let Ok(tagged) = lofty::read_from_path(file) else {
+        return Tags::default();
+    };
+    let mut tags = Tags {
+        duration: tagged.properties().duration().as_secs_f64(),
+        ..Tags::default()
+    };
+    let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
+        return tags;
+    };
+    let text = |value: Option<std::borrow::Cow<str>>| {
+        value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    };
+    tags.title = text(tag.title());
+    tags.artist = text(tag.artist());
+    tags.album = text(tag.album());
+    tags.cover = tag.pictures().first().and_then(|picture| {
+        let ext = match picture.mime_type() {
+            Some(MimeType::Png) => "png",
+            Some(MimeType::Jpeg) => "jpg",
+            _ => return None,
+        };
+        let path = media.join(format!("{id}.cover.{ext}"));
+        fs::write(&path, picture.data()).ok()?;
+        Some(path.to_string_lossy().into_owned())
+    });
+    tags
 }
 #[tauri::command]
 fn shuffle_tracks(ids: Vec<String>, keep_first: Option<String>) -> Result<Vec<String>, String> {
@@ -133,8 +177,9 @@ async fn spotify_disconnect(
 async fn spotify_player_start(
     spotify: State<'_, std::sync::Arc<spotify::Spotify>>,
     player: State<'_, native_player::NativePlayer>,
+    volume: Option<u8>,
 ) -> Result<String, String> {
-    player.start(spotify.inner().clone()).await
+    player.start(spotify.inner().clone(), volume).await
 }
 #[tauri::command]
 fn spotify_player_status(player: State<'_, native_player::NativePlayer>) -> native_player::Status {
@@ -144,6 +189,24 @@ fn spotify_player_status(player: State<'_, native_player::NativePlayer>) -> nati
 async fn spotify_player_stop(player: State<'_, native_player::NativePlayer>) -> Result<(), String> {
     player.stop().await;
     Ok(())
+}
+/// Build date (`YYYYMMDD`) of the installed Soloist; it expires 90 days later.
+#[tauri::command]
+async fn spotify_player_build() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(native_player::build_date)
+        .await
+        .ok()
+        .flatten()
+}
+/// Lyrics for a song from LRCLIB; `None` when it has none.
+#[tauri::command]
+async fn lyrics_fetch(
+    title: String,
+    artist: String,
+    album: String,
+    duration: f64,
+) -> Result<Option<lyrics::Lyrics>, String> {
+    lyrics::fetch(&title, &artist, &album, duration).await
 }
 /// Shows or hides the floating island; returns whether it is now open.
 // Must be async: creating a window from a sync command deadlocks on Windows.
@@ -166,15 +229,7 @@ fn island_set_visible(app: tauri::AppHandle, visible: bool) {
 /// Now-playing for Windows media controls and the tray tooltip.
 #[tauri::command]
 fn media_update(app: tauri::AppHandle, now: media::NowPlaying) {
-    tray::set_tooltip(
-        &app,
-        &if now.title.is_empty() {
-            "Rustify".to_string()
-        } else {
-            // Windows truncates tray tooltips at 127 characters.
-            format!("{} · {}", now.title, now.artist).chars().take(120).collect()
-        },
-    );
+    tray::set_tooltip(&app, &tray::tooltip(&now));
     media::update(&app, now);
 }
 #[tauri::command]
@@ -200,6 +255,38 @@ fn get_autostart(app: tauri::AppHandle) -> bool {
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
 }
+/// The page reports whether it can be unloaded when closed to the tray.
+#[tauri::command]
+fn set_background_ready(ready: bool) {
+    background::CAN_UNLOAD.store(ready, std::sync::atomic::Ordering::Relaxed);
+}
+/// A command that arrived while the page was unloaded, for it to run now.
+#[tauri::command]
+fn take_wake_command() -> Option<String> {
+    background::take_pending()
+}
+/// Low memory mode is remembered as a marker file so it can be read before the
+/// first window exists. Delete `low-memory` in Rustify's data folder (or start
+/// with `--no-low-memory`) to turn it off if a window ever fails to draw.
+fn low_memory_marker(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(root(app)?.join("low-memory"))
+}
+#[tauri::command]
+fn get_low_memory(app: tauri::AppHandle) -> bool {
+    low_memory_marker(&app).map(|p| p.exists()).unwrap_or(false)
+}
+/// Takes effect the next time Rustify starts.
+#[tauri::command]
+fn set_low_memory(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let marker = low_memory_marker(&app)?;
+    if enabled {
+        fs::create_dir_all(root(&app)?).map_err(|e| e.to_string())?;
+        fs::write(&marker, b"1").map_err(|e| e.to_string())?;
+    } else if marker.exists() {
+        fs::remove_file(&marker).map_err(|e| e.to_string())?;
+    }
+    Ok(enabled)
+}
 /// Started by Windows at sign-in: stay in the tray instead of showing the window.
 const MINIMIZED: &str = "--minimized";
 pub fn run() {
@@ -223,6 +310,12 @@ pub fn run() {
                 std::sync::Arc::new(vault),
             )));
             let handle = app.handle();
+            std::thread::spawn(native_player::stop_leftovers);
+            let low = get_low_memory(handle.clone()) && !std::env::args().any(|a| a == "--no-low-memory");
+            island::LOW_MEMORY.store(low, std::sync::atomic::Ordering::Relaxed);
+            // The main window is built here rather than in tauri.conf.json so
+            // its WebView2 arguments can follow the low memory setting.
+            background::build_main(handle, false)?;
             if let Err(e) = tray::init(handle) {
                 eprintln!("tray unavailable: {e}");
             }
@@ -242,8 +335,16 @@ pub fn run() {
             // Closing the window keeps Rustify playing in the tray (if enabled).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && tray::close_to_tray() {
-                    api.prevent_close();
-                    let _ = window.hide();
+                    // Let the window (and with it WebView2) go when the page
+                    // says nothing needs it; otherwise just hide it.
+                    let unload = background::CAN_UNLOAD.load(std::sync::atomic::Ordering::Relaxed)
+                        && window.app_handle().get_webview_window(island::LABEL).is_none();
+                    if unload {
+                        background::start(window.app_handle());
+                    } else {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
             }
             // The island mirrors the main window; close it with the app.
@@ -265,6 +366,8 @@ pub fn run() {
             spotify_player_start,
             spotify_player_status,
             spotify_player_stop,
+            spotify_player_build,
+            lyrics_fetch,
             island_toggle,
             island_show_main,
             island_configure,
@@ -273,14 +376,26 @@ pub fn run() {
             set_close_to_tray,
             set_hotkeys,
             set_autostart,
-            get_autostart
+            get_autostart,
+            get_low_memory,
+            set_low_memory,
+            set_background_ready,
+            take_wake_command
         ])
         .build(tauri::generate_context!())
         .expect("Could not launch desktop app")
         .run(|app, event| {
             // Never leave the hidden Spotify player running after Rustify closes.
-            if let tauri::RunEvent::Exit = event {
-                app.state::<native_player::NativePlayer>().kill_now();
+            match event {
+                tauri::RunEvent::Exit => app.state::<native_player::NativePlayer>().kill_now(),
+                // Closing the last window while unloading to the tray must not
+                // end Rustify. Quit from the tray exits with a code and passes.
+                tauri::RunEvent::ExitRequested { api, code: None, .. }
+                    if background::HEADLESS.load(std::sync::atomic::Ordering::Relaxed) =>
+                {
+                    api.prevent_exit()
+                }
+                _ => {}
             }
         });
 }

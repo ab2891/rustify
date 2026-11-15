@@ -17,7 +17,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 100%;
+  height: 68px;
   padding: 0 10px 0 12px;
   border-radius: 34px;
   background: rgba(14, 14, 14, calc(0.94 * var(--opacity, 1)));
@@ -121,3 +121,30 @@ svg { width: 16px; height: 16px; }
   background: var(--green);
 }
 .empty { color: var(--muted); font-size: 12px; flex: 1; pointer-events: none; }
+/* Lyrics dropdown: a second rounded box under the pill. */
+.lyrics {
+  position: relative;
+  height: calc(100% - 68px - 6px);
+  margin-top: 6px;
+  padding: 10px 16px;
+  border-radius: 18px;
+  background: rgba(14, 14, 14, calc(0.94 * var(--opacity, 1)));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-y: auto;
+  scrollbar-width: none;
+  cursor: grab;
+}
+.lyrics[hidden] { display: none; }
+.lyrics > * { opacity: max(var(--opacity, 1), 0.6); pointer-events: none; }
+.lyrics .lines { padding: 50px 0; }
+.lyrics p { margin: 0 0 6px; text-align: center; transition: color 0.2s; }
+.lyrics p.now { color: #fff; font-weight: 700; font-size: 14px; }
+.lyrics .plain { white-space: pre-wrap; text-align: center; }
+.lyrics .plain small { display: block; margin-bottom: 8px; font-size: 11px; opacity: 0.7; }
+.lyrics .note { margin-top: 48px; }
+@media (prefers-reduced-motion: reduce) { .lyrics p { transition: none; } }
+/* Estimated timing: the current line is marked more softly, since it is a guess. */
+.lyrics .estimated p.now { font-weight: 400; font-size: 13px; }

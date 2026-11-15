@@ -947,6 +947,9 @@ input[type="range"]:hover {
 .track-table tbody tr {
   cursor: pointer;
 }
+.track-table tr.selected td {
+  background: #ffffff2e;
+}
 .track-table tr.playing .song-title {
   color: var(--green);
 }
@@ -2350,3 +2353,39 @@ input[type="range"]:hover {
     min-height: 210px;
   }
 }
+
+/* Add/Edit lyrics dialog and the Now Playing lyrics card. */
+.modal textarea {
+  display: block;
+  width: 100%;
+  background: #3e3e3e;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 13px;
+  color: white;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.own-lyrics {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow-y: auto;
+  user-select: text;
+}
+.lyrics-hint {
+  color: var(--muted, #b3b3b3);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.sync-lines {
+  margin: 14px 0 4px;
+  padding: 14px;
+  border-radius: 6px;
+  background: #171717;
+  text-align: center;
+}
+.sync-lines p { margin: 6px 0; color: #8a8a8a; }
+.sync-lines p.next { color: white; font-size: 18px; font-weight: 700; }
+.sync-lines small { color: #1ed760; }

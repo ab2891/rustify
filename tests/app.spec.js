@@ -21,7 +21,7 @@ test("actual audio decodes, plays, seeks, pauses and advances", async ({
 }) => {
   await local(page);
   await playlist(page);
-  await page.locator('tr[data-track="night-drive"]').click();
+  await page.locator('tr[data-track="night-drive"]').dblclick();
   await expect(
     page.getByRole("button", { name: "Pause", exact: true }),
   ).toBeVisible();
@@ -79,7 +79,7 @@ test("imported audio persists in IndexedDB and plays after restart", async ({
   ).toBeVisible();
   await page.reload();
   await page.locator('[data-route="local"]').first().click();
-  await page.locator("tr").filter({ hasText: "My recording" }).click();
+  await page.locator("tr").filter({ hasText: "My recording" }).dblclick();
   await expect(
     page.getByRole("button", { name: "Pause", exact: true }),
   ).toBeVisible();
@@ -92,7 +92,7 @@ test("queue honors manual enqueue, removes queued songs and shows next track", a
 }) => {
   await local(page);
   await playlist(page);
-  await page.locator('tr[data-track="night-drive"]').click();
+  await page.locator('tr[data-track="night-drive"]').dblclick();
   await page.getByRole("button", { name: "Options for Blue Hour" }).click();
   await page.getByRole("button", { name: "Add to queue", exact: true }).click();
   await page.getByRole("button", { name: "Show queue" }).click();
@@ -141,7 +141,7 @@ test("search, playlist add/remove, keyboard control and responsive layout", asyn
   await expect(
     page.getByRole("textbox", { name: "Search music", exact: true }),
   ).toBeFocused();
-  await page.locator('tr[data-track="daylight"]').click();
+  await page.locator('tr[data-track="daylight"]').dblclick();
   await page.keyboard.press("Space");
   expect(await page.locator("#audio-engine").evaluate((a) => a.paused)).toBe(
     true,
@@ -251,12 +251,17 @@ async function fakeSpotify(page, restore = false, options = {}) {
           window.calls.push({ command, args });
           if (command === "island_toggle") return (window.islandOpen = !window.islandOpen);
           if (command === "get_autostart") return Boolean(window.autostart);
+          if (command === "get_low_memory") return Boolean(window.lowMemory);
+          if (command === "take_wake_command") { const c = options.wake || null; options.wake = null; return c; }
+          if (command === "set_low_memory") return (window.lowMemory = args.enabled);
           if (command === "set_autostart") return (window.autostart = args.enabled);
           if (command === "plugin:event|listen") { (window.eventHandlers ||= {})[args.event] = args.handler; return args.handler; }
           if (command === "plugin:event|emit_to") { (window.emitted ||= []).push(args); return null; }
           if (command === "spotify_player_start") { window.playerStarted = true; return "rustify-player"; }
           if (command === "spotify_player_status") return { device_id: window.playerStarted ? "rustify-player" : null, starting: false, error: null };
           if (command === "spotify_player_stop") { window.playerStarted = false; return null; }
+          if (command === "spotify_player_build") return options.soloistBuild || null;
+          if (command === "lyrics_fetch") return options.lyrics || null;
           if (command === "get_library") return demo;
           if (command === "spotify_restore")
             return restore && !localStorage.getItem("test-disconnected")
@@ -304,7 +309,7 @@ async function fakeSpotify(page, restore = false, options = {}) {
               return {
                 item: active,
                 is_playing: playing,
-                progress_ms: 1000,
+                progress_ms: window.testProgress ?? 1000,
                 repeat_state: "off",
                 shuffle_state: false,
                 context,
@@ -515,7 +520,7 @@ test("Spotify IPC contract uses 2026 items endpoint, context offset and encoded 
   await expect(
     page.getByRole("heading", { name: "My Spotify playlist", exact: true }),
   ).toBeVisible();
-  await page.locator('tr[data-track="remote-track"] .song-title').click();
+  await page.locator('tr[data-track="remote-track"] .song-title').dblclick();
   const play = await page.evaluate(() =>
     window.calls.find((c) => c.args?.path?.startsWith("/me/player/play")),
   );
@@ -588,7 +593,7 @@ test("source switch rejects late remote playback responses", async ({
     page.getByRole("heading", { name: "Your albums" }),
   ).toBeVisible();
   await page.locator('.library-item[data-id="late-nights"]').click();
-  await page.locator('tr[data-track="night-drive"]').click();
+  await page.locator('tr[data-track="night-drive"]').dblclick();
   await expect(page.locator(".current-track strong")).toHaveText("Night Drive");
   await page.evaluate(() => window.releasePlayer());
   await page.waitForTimeout(100);
@@ -687,6 +692,7 @@ test("local True shuffle plays every track exactly once and stops at the end", a
   for (let i = 0; i < 4; i++) {
     titles.push(await page.locator(".current-track strong").textContent());
     await page.getByRole("button", { name: "Next track", exact: true }).click();
+    await page.waitForTimeout(120);
   }
   expect(new Set(titles).size).toBe(4);
   expect(await page.locator("#audio-engine").evaluate((a) => a.paused)).toBe(
@@ -841,7 +847,7 @@ test("saved song date remains distinct from its playlist membership after playba
   await fakeSpotify(page);
   await page.locator('.library-item[data-route="liked"]').click();
   await expect(page.locator("tbody .date-added").first()).toContainText("Nov");
-  await page.locator('tr[data-track="remote-track"] .song-title').click();
+  await page.locator('tr[data-track="remote-track"] .song-title').dblclick();
   await page.locator('.library-item[data-id="remote-playlist"]').click();
   await expect(page.locator("tbody .date-added").first()).toContainText("Oct");
   await page.locator('.library-item[data-route="liked"]').click();
@@ -893,7 +899,7 @@ test("new collection playback clears a deferred order from the old playlist", as
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await page.locator('.playlist-actions [data-action="shuffle"]').click();
   await page.locator('.library-item[data-id="other-playlist"]').click();
-  await page.locator('tr[data-track="other-track"] .song-title').click();
+  await page.locator('tr[data-track="other-track"] .song-title').dblclick();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await page.getByRole("button", { name: "Play", exact: true }).click();
   const last = await page.evaluate(() =>
@@ -1075,7 +1081,7 @@ test("regional playback aliases confirm and remain canonical after skipping beyo
   await page.locator('.big-play').click();
   await expect(page.getByRole('status')).toContainText('137 unique songs');
   // Cross the initial 20-song confirmation window and retain canonical seen IDs.
-  for(let i=0;i<22;i++)await page.getByRole('button',{name:'Next track',exact:true}).click();
+  for(let i=0;i<22;i++){await page.getByRole('button',{name:'Next track',exact:true}).click();await page.waitForTimeout(120);}
   await page.getByRole('button',{name:'Show queue',exact:true}).click();
   await expect(page.locator('.shuffle-note')).toContainText('114 songs left');
   await page.getByRole('button',{name:'Reshuffle remaining',exact:true}).click();
@@ -1096,7 +1102,7 @@ test("Rustify built-in player replaces the need for another Spotify app", async 
 test("play automatically sets up Rustify audio when no Spotify device exists", async ({ page }) => {
   await fakeSpotify(page, true, { noDevices: true });
   await page.getByRole("textbox", { name: "Search music", exact: true }).fill("ambient");
-  await page.getByRole("row", { name: "Play Remote song by Remote artist", exact: true }).click();
+  await page.getByRole("row", { name: "Play Remote song by Remote artist", exact: true }).dblclick();
   await expect.poll(() => page.evaluate(() => window.calls.some(c => c.args?.path?.startsWith("/me/player/play") && c.args.path.includes("device_id=rustify-player")))).toBe(true);
 });
 
@@ -1157,12 +1163,12 @@ test("Settings toggles tray, hotkeys and island options", async ({ page }) => {
   await dialog.locator('[data-action="system-hotkeys"]').click();
   await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "set_hotkeys").at(-1)?.args)).toEqual({ enabled: false });
   await dialog.locator('[data-action="island-compact"]').click();
-  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "island_configure").at(-1)?.args)).toEqual({ options: { compact: true, click_through: false } });
+  await expect.poll(() => page.evaluate(() => window.calls.filter((c) => c.command === "island_configure").at(-1)?.args)).toEqual({ options: { compact: true, click_through: false, lyrics: false } });
   await dialog.locator('[data-action="island-opacity"][data-value="70"]').click();
   await expect(dialog.locator('[data-action="island-opacity"][data-value="70"]')).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("rustify-island")))).toMatchObject({ compact: true, opacity: 70 });
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("rustify-system")))).toEqual({ tray: false, hotkeys: false });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("rustify-system")))).toEqual({ tray: false, hotkeys: false, unload: true });
   await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.command === "set_close_to_tray")?.args)).toEqual({ enabled: false });
 });
 
@@ -1170,7 +1176,7 @@ test("sleep timer pauses playback after the chosen time", async ({ page }) => {
   await page.clock.install();
   await fakeSpotify(page, true);
   await page.getByRole("textbox", { name: "Search music", exact: true }).fill("ambient");
-  await page.getByRole("row", { name: "Play Remote song by Remote artist", exact: true }).click();
+  await page.getByRole("row", { name: "Play Remote song by Remote artist", exact: true }).dblclick();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings and account", exact: true }).click();
   await page.locator('[data-action="sleep-timer"][data-value="15"]').click();
@@ -1198,3 +1204,241 @@ test("no browser context menu outside text fields; start with Windows toggles", 
   await expect(page.locator('[data-action="system-autostart"]')).toHaveAttribute("aria-pressed", "true");
 });
 
+
+test("player bar and playing row follow Spotify after the seek bar was clicked", async ({ page }) => {
+  await fakeSpotify(page, true, { large: true });
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await expect(page.locator('tr[data-track="remote-track"]')).toHaveClass(/playing/);
+  const box = await page.locator("#seek").boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(
+    await page.evaluate(() =>
+      window.calls.some((c) => c.args?.path?.startsWith("/me/player/seek?position_ms=")),
+    ),
+  ).toBe(true);
+  // The click must not leave the bar frozen (it used to stay focused forever).
+  await expect(page.locator("#seek")).not.toBeFocused();
+  await page.evaluate(() => window.testExternalAdvance());
+  await expect(page.locator(".current-track strong")).toHaveText("Pool song 1", { timeout: 8000 });
+  await expect(page.locator('tr[data-track="pool-1"]')).toHaveClass(/playing/);
+  await expect(page.locator('tr[data-track="remote-track"]')).not.toHaveClass(/playing/);
+});
+
+test("Previous restarts the song after three seconds instead of skipping back", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await expect(page.locator(".current-track strong")).toHaveText("Remote song");
+  await page.getByRole("button", { name: "Previous track", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/previous"))))
+    .toBe(true);
+  await page.evaluate(() => (window.testProgress = 10000));
+  await expect(page.locator("#elapsed")).toHaveText(/0:1\d/, { timeout: 8000 });
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.getByRole("button", { name: "Previous track", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/seek?position_ms=0"))))
+    .toBe(true);
+  expect(
+    await page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/previous"))),
+  ).toBe(false);
+});
+
+test("playing from Liked Songs keeps earlier songs reachable and liking does not reload the list", async ({ page }) => {
+  await fakeSpotify(page, true, { large: true });
+  await page.locator('.library-item[data-route="liked"]').click();
+  await page.getByRole("button", { name: "Load more songs" }).click();
+  await expect(page.locator("tr[data-track]")).toHaveCount(100);
+  await page.locator('tr[data-track="pool-2"] .song-title').dblclick();
+  const play = await page.evaluate(() =>
+    window.calls.find((c) => c.args?.path?.startsWith("/me/player/play")),
+  );
+  expect(play.args.body.uris).toHaveLength(100);
+  expect(play.args.body.offset).toEqual({ position: 2 });
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.locator('tr[data-track="pool-5"] .like-row').click();
+  await expect(page.locator('tr[data-track="pool-5"]')).toHaveCount(0);
+  // The other loaded page stays; page one is not fetched again.
+  await expect(page.locator("tr[data-track]")).toHaveCount(99);
+  expect(
+    await page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/tracks"))),
+  ).toBe(false);
+});
+
+test("pause shows at once and survives a stale answer that was already in flight", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.evaluate(() => (window.delayNextPlayer = true));
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  // The state read is still held back: the button changed without it.
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Boolean(window.releasePlayer))).toBe(true);
+  await page.evaluate(() => window.releasePlayer());
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+});
+
+test("play button pauses the playing collection, shortcuts and steady progress", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await page.locator('tr[data-track="remote-track"] .song-title').dblclick();
+  // The open playlist is the one playing: its button pauses instead of restarting.
+  await expect(page.getByRole("button", { name: "Pause My Spotify playlist", exact: true })).toBeVisible();
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.locator(".big-play").click();
+  await expect(page.getByRole("button", { name: "Play My Spotify playlist", exact: true })).toBeVisible();
+  const paths = () => page.evaluate(() => window.calls.map((c) => c.args?.path || "").filter((p) => p.startsWith("/me/player/")));
+  expect((await paths()).some((p) => p.startsWith("/me/player/pause"))).toBe(true);
+  expect((await paths()).some((p) => p.startsWith("/me/player/play"))).toBe(false);
+  await page.locator(".big-play").click();
+  await expect(page.getByRole("button", { name: "Pause My Spotify playlist", exact: true })).toBeVisible();
+  // Shift+Right seeks 5 seconds; Ctrl+Up raises the volume; Ctrl+R cycles repeat.
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.locator(".content").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(async () => (await paths()).some((p) => /\/me\/player\/seek\?position_ms=[6-9]\d{3}/.test(p))).toBe(true);
+  await page.keyboard.press("Control+ArrowUp");
+  await expect.poll(async () => (await paths()).some((p) => p.startsWith("/me/player/volume?volume_percent=70"))).toBe(true);
+  await page.keyboard.press("Control+r");
+  await expect.poll(async () => (await paths()).some((p) => p.startsWith("/me/player/repeat?state=context"))).toBe(true);
+  await page.keyboard.press("Alt+Shift+S");
+  await expect(page.getByRole("heading", { name: "Liked Songs", exact: true })).toBeVisible();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByRole("heading", { name: "My Spotify playlist", exact: true })).toBeVisible();
+});
+
+test("a click selects, double-click plays, and a selection is queued or reordered together", async ({ page }) => {
+  await fakeSpotify(page, true, { large: true });
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await expect(page.locator('tr[data-track="pool-3"]')).toBeVisible();
+  await page.evaluate(() => (window.calls.length = 0));
+  const paths = (method) => page.evaluate((method) => window.calls.filter((c) => c.args?.method === method).map((c) => c.args.path), method);
+  // One click only selects.
+  await page.locator('tr[data-track="pool-2"] .song-title').click();
+  await expect(page.locator('tr[data-track="pool-2"]')).toHaveClass(/selected/);
+  await page.locator('tr[data-track="pool-4"] .song-title').click({ modifiers: ["Shift"] });
+  await expect(page.locator("tr.selected")).toHaveCount(3);
+  await page.waitForTimeout(300);
+  expect((await paths("PUT")).some((p) => p.startsWith("/me/player/play"))).toBe(false);
+  // Right-click acts on the whole selection.
+  await page.locator('tr[data-track="pool-3"] .song-title').click({ button: "right" });
+  await page.getByRole("button", { name: "Add 3 songs to queue", exact: true }).click();
+  await expect.poll(async () => (await paths("POST")).filter((p) => p.startsWith("/me/player/queue")).length).toBe(3);
+  expect((await paths("POST")).filter((p) => p.startsWith("/me/player/queue")).map((p) => decodeURIComponent(p.split("uri=")[1]))).toEqual([
+    "spotify:track:pool-2", "spotify:track:pool-3", "spotify:track:pool-4",
+  ]);
+  // Dragging a row onto a later row moves it there in the Spotify playlist.
+  await page.locator('tr[data-track="pool-1"]').dragTo(page.locator('tr[data-track="pool-3"]'));
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.args?.method === "PUT" && c.args.path === "/playlists/remote-playlist/items")?.args.body)).toEqual({
+    range_start: 1, insert_before: 4, range_length: 1,
+  });
+  await expect(page.locator("tbody tr").nth(3)).toHaveAttribute("data-track", "pool-1");
+  // Double-click plays.
+  await page.locator('tr[data-track="pool-5"] .song-title').dblclick();
+  await expect.poll(async () => (await paths("PUT")).some((p) => p.startsWith("/me/player/play"))).toBe(true);
+});
+
+test("an expiring Spotify player build is announced ahead of time", async ({ page }) => {
+  const built = new Date(Date.now() - 80 * 86400000).toISOString().slice(0, 10).replaceAll("-", "");
+  await fakeSpotify(page, true, { soloistBuild: built });
+  await expect(page.getByText(/Rustify's Spotify player stops working in (9|10|11) days/)).toBeVisible();
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await expect(page.getByText("Update soon", { exact: true })).toBeVisible();
+});
+
+test("island lyrics are looked up only when its dropdown is opened", async ({ page }) => {
+  await fakeSpotify(page, true, { lyrics: { synced: "[00:01.00] First line\n[00:05.00] Second line", plain: null, instrumental: false } });
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.calls.some((c) => c.command === "lyrics_fetch"))).toBe(false);
+  await page.evaluate(() => window.fireEvent("island-command", "lyrics"));
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.command === "lyrics_fetch")?.args)).toMatchObject({ title: "Remote song", artist: "Remote artist", album: "Remote album" });
+  expect(await page.evaluate(() => window.calls.filter((c) => c.command === "island_configure").at(-1).args.options.lyrics)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.emitted.filter((e) => e.event === "island-state").at(-1)?.payload.lyrics)).toMatchObject({
+    status: "ready", lines: [{ time: 1, text: "First line" }, { time: 5, text: "Second line" }],
+  });
+});
+
+test("your own lyrics can be pasted, and the island uses them without a lookup", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await page.locator('tr[data-track="remote-track"] .song-title').click({ button: "right" });
+  await page.getByRole("button", { name: "Add lyrics", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Add lyrics" });
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Paste the lyrics first.");
+  await dialog.locator("#lyrics-text").fill("My own words\nLine two");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".own-lyrics")).toHaveText("My own words\nLine two");
+  // The island shows them and never asks the lyrics service.
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  await page.evaluate(() => window.fireEvent("island-command", "lyrics"));
+  await expect.poll(() => page.evaluate(() => window.emitted.filter((e) => e.event === "island-state").at(-1)?.payload.lyrics)).toMatchObject({ status: "ready", estimated: true, own: true, lines: [{ text: "My own words" }, { text: "Line two" }] });
+  expect(await page.evaluate(() => window.calls.some((c) => c.command === "lyrics_fetch"))).toBe(false);
+  // Removing them goes back to looking the song up.
+  await page.locator('.lyrics-card [data-action="lyrics-edit"]').click();
+  await page.getByRole("dialog", { name: "Edit lyrics" }).getByRole("button", { name: "Remove", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.command === "lyrics_fetch"))).toBe(true);
+});
+
+test("pasted lyrics scroll on an estimate, and tapping along saves exact timings", async ({ page }) => {
+  await fakeSpotify(page, true);
+  const islandLyrics = () => page.evaluate(() => window.emitted.filter((e) => e.event === "island-state").at(-1)?.payload.lyrics);
+  await page.locator('.lyrics-card [data-action="lyrics-edit"]').click();
+  await page.locator("#lyrics-text").fill("[Verse 1]\nFirst line\nSecond line\n\nThird line");
+  await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  await page.evaluate(() => window.fireEvent("island-command", "lyrics"));
+  // Untimed: three sung lines with guessed, increasing times.
+  await expect.poll(islandLyrics).toMatchObject({ status: "ready", estimated: true, lines: [{ text: "First line" }, { text: "Second line" }, { text: "Third line" }] });
+  // Tap along: each press stamps the next line with the song position.
+  await page.locator('.lyrics-card [data-action="lyrics-edit"]').click();
+  await page.getByRole("button", { name: "Sync to song", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sync lyrics to the song" });
+  await expect(dialog.locator(".sync-lines .next")).toHaveText("First line");
+  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Line starts now", exact: true }).click();
+  await expect(dialog.locator(".sync-lines .next")).toHaveText("Second line");
+  await dialog.getByRole("button", { name: "Undo line", exact: true }).click();
+  await expect(dialog.locator(".sync-lines .next")).toHaveText("First line");
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(150);
+  }
+  await expect(dialog.getByText("3 of 3 lines timed")).toBeVisible();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  const saved = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem("rustify-custom-lyrics")))[0]);
+  expect(saved).toMatch(/^\[\d\d:\d\d\.\d\d\] First line\n\[\d\d:\d\d\.\d\d\] Second line\n\[\d\d:\d\d\.\d\d\] Third line$/);
+  await expect.poll(async () => (await islandLyrics()).estimated).toBeFalsy();
+  expect(await islandLyrics()).toMatchObject({ status: "ready", lines: [{ text: "First line" }, { text: "Second line" }, { text: "Third line" }] });
+  // The card shows words only, and re-saving unchanged words keeps the timing.
+  await expect(page.locator(".own-lyrics")).toHaveText("First line\nSecond line\nThird line");
+  await page.locator('.lyrics-card [data-action="lyrics-edit"]').click();
+  await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  expect(await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem("rustify-custom-lyrics")))[0])).toBe(saved);
+});
+
+test("the page reports when it can be unloaded in the tray, and runs the command that woke it", async ({ page }) => {
+  await fakeSpotify(page, true, { wake: "next" });
+  const ready = () => page.evaluate(() => window.calls.filter((c) => c.command === "set_background_ready").at(-1)?.args.ready);
+  // Signed in to Spotify with nothing page-bound running: safe to unload.
+  await expect.poll(ready).toBe(true);
+  // The command that reopened the page is carried out once signed in.
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/player/next")))).toBe(true);
+  // The island lives in the page, so opening it keeps the page loaded.
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  await expect.poll(ready).toBe(false);
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await page.evaluate(() => window.fireEvent("island-closed"));
+  await expect.poll(ready).toBe(true);
+  // Turning the setting off keeps the page loaded too.
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await page.getByRole("dialog").locator('[data-action="system-unload"]').click();
+  await expect.poll(ready).toBe(false);
+});

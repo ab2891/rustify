@@ -1,9 +1,28 @@
 // Devices: Rustify's built-in Spotify player (Spotify Soloist) and the
 // "Connect to a device" picker.
+import { soloistExpiry } from "../lyrics.js";
+
+const DOWNLOADS = "https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates";
+
 export default {
   name: "devices",
   setup(ctx) {
     let starting = null;
+    let expiry = null; // { expires: Date, daysLeft } once the installed Soloist is known
+
+    const day = (date) => date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    // Spotify stops each Soloist build 90 days after it was built. Warn two
+    // weeks ahead instead of letting playback fail without warning.
+    async function checkExpiry() {
+      expiry = soloistExpiry(await ctx.spotify.playerBuild());
+      if (!expiry || expiry.daysLeft > 14) return;
+      ctx.toast(
+        expiry.daysLeft > 0
+          ? `Rustify's Spotify player stops working in ${expiry.daysLeft} ${expiry.daysLeft === 1 ? "day" : "days"}. See Settings to update it.`
+          : "Rustify's Spotify player has expired. See Settings to update it.",
+        true,
+      );
+    }
 
     // Starts the built-in player and makes it the active Spotify device.
     async function startRustifyPlayer() {
@@ -61,6 +80,15 @@ export default {
     return {
       ensure,
       open,
+      start: () => checkExpiry().catch(() => {}),
+      settings: () => {
+        if (!expiry) return "";
+        const { expires, daysLeft } = expiry;
+        const text = daysLeft > 0
+          ? `Spotify's player build works until ${day(expires)} (${daysLeft} ${daysLeft === 1 ? "day" : "days"} left). After that, download the newest Soloist and extract it over the old one in the Rustify\\soloist folder; pairing is kept.`
+          : `Spotify's player build expired on ${day(expires)}. Download the newest Soloist and extract it over the old one in the Rustify\\soloist folder; pairing is kept.`;
+        return `<div class="setting-group"><h3>Spotify player</h3><div class="setting-row"><div><strong>${daysLeft > 14 ? "Up to date" : daysLeft > 0 ? "Update soon" : "Update needed"}</strong><p>${ctx.h(text)}</p><p class="selectable">${DOWNLOADS}</p></div></div></div>`;
+      },
       actions: {
         devices: open,
         async "rustify-player"(button) {

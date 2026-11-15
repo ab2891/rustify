@@ -10,18 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Rustify",
-        "width": 1440,
-        "height": 950,
-        "minWidth": 820,
-        "minHeight": 600,
-        "visible": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost https://*.scdn.co https://*.spotifycdn.com data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
       "assetProtocol": {

@@ -17,7 +17,7 @@ required-features = ["desktop"]
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:keyring", "dep:tauri-plugin-global-shortcut", "dep:souvlaki", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-autostart"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-opener", "dep:keyring", "dep:tauri-plugin-global-shortcut", "dep:souvlaki", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-autostart", "dep:lofty"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,7 +25,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
 tauri = { version = "2", optional = true, features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
@@ -33,10 +33,13 @@ keyring = { version = "3.6", optional = true, features = ["apple-native", "windo
 tauri-plugin-global-shortcut = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
 tauri-plugin-autostart = { version = "2", optional = true }
+lofty = { version = "0.22", optional = true }
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 # Windows media controls (media keys, volume flyout, lock screen). Not on Linux:
 # its MPRIS backend needs libdbus.
 souvlaki = { version = "0.9", default-features = false, optional = true }
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
 

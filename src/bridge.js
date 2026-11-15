@@ -90,7 +90,11 @@ export async function source(track) {
   return objectURLs.get(track.id);
 }
 export async function importTracks(files) {
-  if (native) return invoke("import_tracks");
+  if (native) {
+    // Embedded covers are saved beside the audio; give the WebView a URL for them.
+    const tracks = await invoke("import_tracks");
+    return tracks.map((t) => (t.cover.startsWith("/art/") ? t : { ...t, cover: convertFileSrc(t.cover) }));
+  }
   const result = [];
   for (const file of files) {
     if (!/\.(mp3|m4a|wav|ogg|flac|aac|opus)$/i.test(file.name)) continue;
@@ -137,6 +141,13 @@ async function listenAll(handlers) {
   const { listen } = await import("@tauri-apps/api/event");
   await Promise.all(Object.entries(handlers).map(([name, run]) => listen(name, (e) => run(e.payload))));
 }
+// Lyrics from LRCLIB (src-tauri/src/lyrics.rs). Resolves to null when there are none.
+export const lyrics = {
+  async fetch({ title, artist, album, duration }) {
+    if (!native) return null;
+    return invoke("lyrics_fetch", { title, artist, album: album || "", duration: duration || 0 });
+  },
+};
 // Windows media controls, tray and global hotkeys (src-tauri media/tray/hotkeys.rs).
 export const system = {
   native,
@@ -153,6 +164,20 @@ export const system = {
   async setAutostart(enabled) {
     return native ? Boolean(await invoke("set_autostart", { enabled })) : false;
   },
+  /** Tells Rust whether the page may be unloaded when closed to the tray. */
+  async setBackgroundReady(ready) {
+    if (native) await invoke("set_background_ready", { ready });
+  },
+  /** A media command that arrived while the page was unloaded. */
+  async takeWakeCommand() {
+    return native ? invoke("take_wake_command") : null;
+  },
+  async getLowMemory() {
+    return native ? Boolean(await invoke("get_low_memory")) : false;
+  },
+  async setLowMemory(enabled) {
+    return native ? Boolean(await invoke("set_low_memory", { enabled })) : false;
+  },
   /** Returns hotkeys another app already owns. */
   async setHotkeys(enabled) {
     return native ? invoke("set_hotkeys", { enabled }) : [];
@@ -161,9 +186,13 @@ export const system = {
 export const spotify = {
   async startPlayer() {
     if (!native) throw new Error("Spotify playback on this computer needs the Rustify desktop app.");
-    return invoke("spotify_player_start");
+    // Soloist forgets its volume between runs; start it at the one last set here.
+    const saved = Math.round(Number(localStorage.getItem("rustify-volume") ?? 0.65) * 100);
+    return invoke("spotify_player_start", { volume: saved > 0 && saved <= 100 ? saved : 40 });
   },
   async playerStatus() { return invoke("spotify_player_status"); },
+  /** Build date (YYYYMMDD) of the installed Soloist, or null. */
+  async playerBuild() { return native ? invoke("spotify_player_build") : null; },
   async stopPlayer() { if (native) await invoke("spotify_player_stop"); },
   async restore() {
     return native ? invoke("spotify_restore") : null;
@@ -195,7 +224,10 @@ export function normalizeTrack(t) {
     artist: t.artists?.map((a) => a.name).join(", ") || "Unknown artist",
     album: t.album?.name || "",
     duration: (t.duration_ms || 0) / 1000,
-    cover: safeImage(t.album?.images?.[0]?.url),
+    // Spotify lists images largest first (640, 300, 64 px). Lists use the
+    // 300 px one: a decoded 640 px cover costs about 1.6 MB of memory each.
+    cover: safeImage((t.album?.images?.[1] || t.album?.images?.[0])?.url),
+    coverLarge: safeImage(t.album?.images?.[0]?.url),
     uri: t.linked_from?.uri || t.uri,
     spotify: true,
     available: t.is_playable !== false,
