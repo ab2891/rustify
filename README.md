@@ -218,7 +218,7 @@ Background features were checked on Windows on 2026-11-14:
 - With tray mode off, closing the window exited Rustify and Soloist.
 - Not automated: the tray menu items (Windows 11 doesn't expose them to UI Automation) and Start with Windows (it writes the HKCU Run key, so it was left for the user to enable). Run Playwright with `LD_LIBRARY_PATH` pointing at NSS/NSPR libraries when the system lacks them.
 
-
+lol kinda funny it blew up into a lot more javascript then i thought it would when i named it, still better overall about a 93% performance increase over spotify and all internals are in rust but didnt realize it would get so js heavy.
 ## License
 
 MIT. See [LICENSE](LICENSE).
