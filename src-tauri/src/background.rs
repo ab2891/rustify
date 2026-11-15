@@ -18,6 +18,77 @@ pub static CAN_UNLOAD: AtomicBool = AtomicBool::new(false);
 /// True while the main window is gone and this module is in charge.
 pub static HEADLESS: AtomicBool = AtomicBool::new(false);
 static OPENING: AtomicBool = AtomicBool::new(false);
+
+/// What should never play (Settings > Skip rules). The page skips these while
+/// it is loaded; this copy lets the tray keep doing it.
+#[derive(Clone, Default, serde::Deserialize)]
+pub struct SkipRules {
+    #[serde(default)]
+    pub explicit: bool,
+    /// Spotify artist ids.
+    #[serde(default)]
+    pub artists: Vec<String>,
+    /// Lower-case genre words; an artist genre containing one is blocked.
+    #[serde(default)]
+    pub genres: Vec<String>,
+}
+pub static RULES: Mutex<Option<SkipRules>> = Mutex::new(None);
+/// Genres per artist id, looked up once.
+static GENRES: Mutex<Option<std::collections::HashMap<String, Vec<String>>>> = Mutex::new(None);
+/// The song the rules were last checked for, and how many were skipped in a row.
+static CHECKED: Mutex<(String, u8)> = Mutex::new((String::new(), 0));
+
+fn genre_blocked(genres: &[String], blocked: &[String]) -> bool {
+    genres.iter().any(|g| blocked.iter().any(|b| !b.is_empty() && g.to_lowercase().contains(b.as_str())))
+}
+
+/// True when the playing song breaks a rule. Checks each song once.
+async fn breaks_rules(spotify: &Spotify, state: &serde_json::Value) -> bool {
+    let Some(rules) = RULES.lock().unwrap().clone() else { return false };
+    let item = &state["item"];
+    let Some(id) = item["id"].as_str() else { return false };
+    if !state["is_playing"].as_bool().unwrap_or(false) {
+        return false;
+    }
+    {
+        let mut checked = CHECKED.lock().unwrap();
+        if checked.0 == id {
+            return false;
+        }
+        checked.0 = id.to_string();
+    }
+    let artists: Vec<String> = item["artists"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x["id"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    if rules.explicit && item["explicit"].as_bool().unwrap_or(false) {
+        return true;
+    }
+    if artists.iter().any(|a| rules.artists.contains(a)) {
+        return true;
+    }
+    if rules.genres.is_empty() {
+        return false;
+    }
+    // Songs carry no genre; their first artist does.
+    let Some(artist) = artists.first() else { return false };
+    let known = GENRES.lock().unwrap().as_ref().and_then(|m| m.get(artist).cloned());
+    let genres = match known {
+        Some(genres) => genres,
+        None => {
+            let Ok(found) = spotify.request("GET", &format!("/artists/{artist}"), None).await else {
+                return false;
+            };
+            let genres: Vec<String> = found["genres"]
+                .as_array()
+                .map(|g| g.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            GENRES.lock().unwrap().get_or_insert_with(Default::default).insert(artist.clone(), genres.clone());
+            genres
+        }
+    };
+    genre_blocked(&genres, &rules.genres)
+}
 /// A command for the page to run once it has loaded again.
 static PENDING: Mutex<Option<String>> = Mutex::new(None);
 
@@ -93,6 +164,20 @@ async fn refresh(app: &AppHandle) {
     if !HEADLESS.load(Ordering::Relaxed) {
         return;
     }
+    if breaks_rules(&spotify, &state).await {
+        // Stop after a few in a row, so a blocked playlist cannot loop forever.
+        let skipped = {
+            let mut checked = CHECKED.lock().unwrap();
+            checked.1 += 1;
+            checked.1
+        };
+        if skipped <= 8 {
+            let _ = spotify.request("POST", "/me/player/next", None).await;
+            return;
+        }
+    } else if state["is_playing"].as_bool().unwrap_or(false) {
+        CHECKED.lock().unwrap().1 = 0;
+    }
     let now = now_playing(&state);
     tray::set_tooltip(app, &tray::tooltip(&now));
     media::update(app, now);
@@ -161,6 +246,13 @@ async fn run(spotify: &Spotify, name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blocked_genres_match_inside_artist_genres() {
+        let genres = vec!["Melodic Death Metal".to_string(), "swedish metal".to_string()];
+        assert!(super::genre_blocked(&genres, &["metal".to_string()]));
+        assert!(!super::genre_blocked(&genres, &["jazz".to_string()]));
+        assert!(!super::genre_blocked(&genres, &[String::new()]));
+    }
     #[test]
     fn player_state_becomes_now_playing() {
         let state = serde_json::json!({

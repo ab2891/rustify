@@ -129,6 +129,12 @@ export const island = {
   async listen(handlers) {
     return listenAll(handlers);
   },
+  /** Sends the island its background picture (a data URL, or "" for none). */
+  async background(image) {
+    if (!native) return;
+    const { emitTo } = await import("@tauri-apps/api/event");
+    await emitTo("island", "island-background", image);
+  },
   async configure(options) {
     if (native) await invoke("island_configure", { options });
   },
@@ -172,6 +178,10 @@ export const system = {
   async takeWakeCommand() {
     return native ? invoke("take_wake_command") : null;
   },
+  /** Skip rules for the tray; null turns them off. */
+  async setSkipRules(rules) {
+    if (native) await invoke("set_skip_rules", { rules });
+  },
   async getLowMemory() {
     return native ? Boolean(await invoke("get_low_memory")) : false;
   },
@@ -191,6 +201,8 @@ export const spotify = {
     return invoke("spotify_player_start", { volume: saved > 0 && saved <= 100 ? saved : 40 });
   },
   async playerStatus() { return invoke("spotify_player_status"); },
+  /** Fades the built-in player's volume (0-100) over about `millis`. */
+  async fade(from, to, millis) { return invoke("spotify_player_fade", { from, to, millis }); },
   /** Build date (YYYYMMDD) of the installed Soloist, or null. */
   async playerBuild() { return native ? invoke("spotify_player_build") : null; },
   async stopPlayer() { if (native) await invoke("spotify_player_stop"); },
@@ -230,6 +242,7 @@ export function normalizeTrack(t) {
     coverLarge: safeImage(t.album?.images?.[0]?.url),
     uri: t.linked_from?.uri || t.uri,
     spotify: true,
+    explicit: Boolean(t.explicit),
     available: t.is_playable !== false,
     type: t.type,
   };

@@ -49,13 +49,34 @@ The integration supports account sign-in, paginated playlists and saved tracks, 
 
 Uses the current [2026 API migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide): playlist `/items`, generalized `/me/library`, and search pages of at most ten results. Saved status is checked independently of the loaded saved-track page.
 
-**Spotify playback supports Rustify's built-in player as well as other Connect devices.** This is not full Spotify parity: recommendations, podcasts/audiobooks, lyrics, social features, downloads/offline catalog playback, billing and account management are not implemented. Live OAuth, catalog/library reads, playlist pagination, device transfer and start/pause have been verified. The installed Windows Spotify 1.3.9.2055 was inspected at 1600×900 to refine panel geometry, navigation, cards and the Now Playing view; typography and feature coverage still differ. Spotify's [Developer Policy](https://developer.spotify.com/policy) requires prior written permission for a product replacing its core experience; API authorization alone does not grant that permission.
+**Spotify playback supports Rustify's built-in player as well as other Connect devices.** This is not full Spotify parity: podcasts/audiobooks, social features, downloads/offline catalog playback, billing and account management are not implemented, and Spotify's recommendation service is not available to new apps (playlist suggestions are artist-based instead). Live OAuth, catalog/library reads, playlist pagination, device transfer and start/pause have been verified. Typography and feature coverage differ from the Spotify app. Spotify's [Developer Policy](https://developer.spotify.com/policy) requires prior written permission for a product replacing its core experience; API authorization alone does not grant that permission.
 
 ## Local music
 
-Six original ambient WAV recordings and original vector covers are bundled. Import MP3, M4A, WAV, OGG, FLAC, AAC or Opus files; actual codec support depends on the platform WebView. Imported metadata initially uses the filename. Native imports copy audio into app-owned storage, exposed only through a scoped asset protocol. Browser preview stores imported blobs in IndexedDB. Native libraries are validated and written through a temporary file and rename. On WebKit, custom-scheme media is fetched into WebView-owned blob URLs; only the current imported recording is retained in memory. Corrupt libraries are reported without being overwritten.
+Six original ambient WAV recordings and original vector covers are bundled. Import MP3, M4A, WAV, OGG, FLAC, AAC or Opus files; actual codec support depends on the platform WebView. Native imports read the embedded title, artist, album, length and cover; files without tags use the filename. Native imports copy audio into app-owned storage, exposed only through a scoped asset protocol. Browser preview stores imported blobs in IndexedDB. Native libraries are validated and written through a temporary file and rename. On WebKit, custom-scheme media is fetched into WebView-owned blob URLs; only the current imported recording is retained in memory. Corrupt libraries are reported without being overwritten.
 
-Local playback supports playlists, track drag/reorder within a playlist, drag tracks to a library playlist, search, likes, history, manual queue, shuffle, repeat all/one, seeking and volume. Local media is not uploaded to Spotify. Space toggles playback, Ctrl/Cmd+K focuses search, M mutes, Ctrl/Cmd+arrows skip, and Alt+Shift+Q opens the queue. Escape closes dialogs; dialogs trap keyboard focus.
+Local playback supports playlists, track drag/reorder within a playlist, drag tracks to a library playlist, search, likes, history, manual queue, shuffle, repeat all/one, seeking and volume. Local media is not uploaded to Spotify. Escape closes dialogs; dialogs trap keyboard focus.
+
+## Keyboard and song lists
+
+- **Playback:** Space play/pause, Ctrl+←/→ previous/next, Shift+←/→ seek 5 seconds, Ctrl+↑/↓ volume, Ctrl+S shuffle, Ctrl+R repeat, M mute.
+- **Navigation:** Alt+←/→ back/forward, Ctrl+L or Ctrl+K search, Ctrl+N new playlist, Ctrl+, settings, Alt+Shift+S Liked Songs, Alt+Shift+H home, Alt+Shift+Q queue, Alt+Shift+D devices, Alt+Shift+B like.
+- **Song lists:** a click selects, Ctrl/Shift-click selects several, double-click or Enter plays. Right-click opens the song menu, which acts on the whole selection (queue, add to playlist, remove). Drag a row onto another to reorder a playlist, or onto a playlist in the library to add it.
+- **Search and sort in a list:** every playlist, album and Liked Songs has a search box and a sort menu; a filtered or sorted list plays in the order shown.
+
+## Lyrics
+
+The island's arrow opens a lyrics dropdown. Lyrics come from [lrclib.net](https://lrclib.net), a free public database: **opening the dropdown sends the title, artist, album and length of each song you play to that site**; nothing is sent while it is closed. Timed lyrics follow the song line by line.
+
+You can also add your own lyrics for a song (song menu or the Now Playing panel → Add lyrics). They are kept on this computer and replace the lookup for that song. Untimed lyrics scroll on an estimate (the mouse wheel nudges them); **Sync to song** lets you tap as each line starts, which saves exact timings.
+
+## Skip rules, transitions, stats, suggestions and home
+
+- **Skip rules (Settings):** never play chosen artists, genres or explicit songs. Spotify has no genre per song, so a song's genre is its first artist's genres. Rules also apply while Rustify is in the tray.
+- **Transitions (Settings):** fade out/in on pause, resume and skip, on Rustify's own player. Two songs cannot overlap; there is one player.
+- **Your stats:** Spotify's top artists and songs (4 weeks, 6 months, all time), recently played, and a play log Rustify keeps on this computer. Top music needs the `user-top-read` and `user-read-recently-played` permissions, so sign in again if you connected before they were added.
+- **Playlist suggestions:** under a Spotify playlist, suggests more songs by the artists that appear most in it.
+- **Home:** Customize hides and reorders the home page sections.
 
 ## Running in the background
 
@@ -69,8 +90,11 @@ Local playback supports playlists, track drag/reorder within a playlist, drag tr
 - **Start with Windows.** Off by default; turn it on in Settings. Rustify then starts in the tray at sign-in (`--minimized`), with no window flash.
 - **Single instance.** Launching Rustify while it is already running brings up the existing window. Two copies never compete for the Soloist player.
 - **Sleep timer.** In Settings: pause after 15/30/60 minutes or at the end of the current song.
+- **Free memory in the tray.** On by default. When the window is closed to the tray and nothing needs the page (no True shuffle, sleep timer, island or local playback), the window is destroyed so WebView2 shuts down; `background.rs` then answers media keys, the tray and hotkeys through the Web API and keeps the Windows media controls current. Opening Rustify again rebuilds the window.
+- **Low memory mode.** Off by default; applies after a restart. Runs WebView2 without its graphics process. If a window ever fails to draw, start Rustify with `--no-low-memory`.
+- **Soloist lifetime.** Soloist runs in a Windows job object, so it ends whenever Rustify ends (including a crash or Task Manager), and leftovers from an earlier run are cleared at startup.
 
-Media keys, the tray, the hotkeys and the island all send the same `media-command` event to the frontend. `src/features/system.js` handles it.
+Media keys, the tray, the hotkeys and the island all send the same `media-command` event to the frontend while its window exists; `src/features/system.js` handles it. While the window is unloaded, `background.rs` handles them.
 
 ## Island (floating mini player)
 
@@ -80,6 +104,8 @@ The island is a small pill-shaped player that floats above other windows. Turn i
 - **Hide while paused.**
 - **Opacity:** 100/85/70/50%.
 - **Click-through:** clicks reach the window underneath. Turn it off in Settings.
+- **Background:** dark, the playing song's cover (blurred), a colour, or your own picture.
+- **Like button and lyrics dropdown** (see Lyrics).
 
 How it works: `src-tauri/src/island.rs` creates a frameless, transparent, always-on-top window that is hidden from the taskbar, and saves its position to `island.json` in the app data folder. `island.html` and `src/island.js` only display what they're sent and send commands back. `src/features/island.js` sends it the `player` snapshot and passes its play/next/previous commands to the normal app actions.
 
@@ -101,7 +127,15 @@ Features can also add a Settings section with `settings: () => html`, run code o
 - `src/features/devices.js`: built-in player and device picker
 - `src/features/island.js`: floating mini player
 - `src/features/system.js`: media keys, tray and hotkeys
-- `src/features/sleep.js`: sleep timer The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
+- `src/features/sleep.js`: sleep timer
+- `src/features/lyrics.js`: your own lyrics and Sync to song
+- `src/features/rules.js`: skip rules
+- `src/features/transitions.js`: fades
+- `src/features/stats.js`: stats page and play log
+- `src/features/home.js`: home page layout
+- `src/features/suggestions.js`: playlist suggestions
+
+ The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
 
 **Rust.** Each concern is its own module, listed in `src-tauri/src/lib.rs`: `library`, `spotify`, `credentials`, `shuffle`, `native_player`, and `desktop`. `desktop` holds the Tauri commands. To add a native capability:
 
@@ -121,6 +155,8 @@ New Spotify Web API endpoints must also be allow-listed in `allowed_url` in `spo
 - `src-tauri/src/desktop.rs`: Tauri commands (native import, Spotify, player, island) and app startup.
 - `src-tauri/src/island.rs`, `island.html`, `src/island.js`: the floating island window.
 - `src-tauri/src/media.rs`, `tray.rs`, `hotkeys.rs`: Windows media controls, tray icon and global hotkeys.
+- `src-tauri/src/background.rs`: runs without the page while closed to the tray; skip rules in the tray.
+- `src-tauri/src/lyrics.rs`: lyrics lookup (lrclib.net).
 - `src/features/`: self-contained frontend features and the feature registry.
 - `src/`: vanilla frontend and local-file playback. Local files use the WebView's audio decoder; Spotify audio is played by Soloist.
 - `public/`: original artwork, demo recordings and library seed.
@@ -158,7 +194,6 @@ Remote playback submits the complete URI list with an explicit position-zero off
 
 Saved albums now have their own library view and save/remove actions. Library and Now Playing panels support mouse and keyboard resizing with persisted widths. See the [current media and verification record](../../docs/design/reviews/rustify-shuffle-2026-11-13/README.md) and [feature coverage](FEATURES.md).
 
-[Browser playback setup, media and verification limits](../../docs/design/reviews/rustify-playback-2026-11-13/README.md).
 
 ## Windows build from WSL
 

@@ -183,6 +183,58 @@ fn parse_build_date(version: &str) -> Option<String> {
 
 static STARTING: Mutex<()> = Mutex::new(());
 
+/// Sets the player's volume through its local control channel, which answers
+/// much faster than the Web API. Fails if Soloist is not running.
+fn local_volume(home: &Path, percent: u8) -> Result<(), String> {
+    let mut command = Command::new(executable(home));
+    command
+        .args(["ctl", "volume", &percent.min(100).to_string()])
+        .arg("--data-dir")
+        .arg(home.join("soloist-data"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let status = command.status().map_err(|e| e.to_string())?;
+    status.success().then_some(()).ok_or_else(|| "The player did not accept the volume change.".to_string())
+}
+
+/// Moves the volume from `from` to `to` (0-100) in a few steps over about
+/// `millis`. Blocking; call it off the UI thread.
+pub fn fade(from: u8, to: u8, millis: u64) -> Result<(), String> {
+    let home = home().ok_or("Could not find the Rustify data folder.")?;
+    for (level, wait) in fade_steps(from, to, millis) {
+        let started = Instant::now();
+        local_volume(&home, level)?;
+        // Each step already takes a moment; only sleep for what is left of it.
+        if let Some(rest) = wait.checked_sub(started.elapsed()) {
+            std::thread::sleep(rest);
+        }
+    }
+    Ok(())
+}
+
+/// The volume levels of a fade and how long each should last.
+fn fade_steps(from: u8, to: u8, millis: u64) -> Vec<(u8, Duration)> {
+    const STEPS: i32 = 5;
+    let (from, to) = (from.min(100) as i32, to.min(100) as i32);
+    // No time or no change: one call.
+    if millis == 0 || from == to {
+        return vec![(to as u8, Duration::ZERO)];
+    }
+    (1..=STEPS)
+        .map(|i| {
+            let level = from + (to - from) * i / STEPS;
+            let wait = if i < STEPS { Duration::from_millis(millis / STEPS as u64) } else { Duration::ZERO };
+            (level as u8, wait)
+        })
+        .collect()
+}
+
 /// Run once when Rustify starts: no player of ours exists yet, so any Soloist
 /// still running from Rustify's folder was left behind by a copy of Rustify
 /// that was ended from Task Manager or crashed. Without this it would keep
@@ -222,6 +274,9 @@ fn launch(volume: Option<u8>) -> Result<Child, String> {
         .arg(home.join("soloist-cache"))
         .args(["--cache-size", "200"])
         .args(["--initial-volume", &volume.unwrap_or(40).min(100).to_string()])
+        // Local control channel (loopback only, port chosen by the system and
+        // written to the data folder). Used for quick volume fades.
+        .args(["--ws", "127.0.0.1:0"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -324,6 +379,14 @@ async fn find_device(spotify: &Spotify, child: &mut Child) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fades_end_exactly_on_the_target() {
+        let down: Vec<u8> = super::fade_steps(60, 0, 500).into_iter().map(|s| s.0).collect();
+        assert_eq!(down, [48, 36, 24, 12, 0]);
+        let up: Vec<u8> = super::fade_steps(0, 73, 500).into_iter().map(|s| s.0).collect();
+        assert_eq!(up.last(), Some(&73));
+        assert!(up.windows(2).all(|w| w[0] <= w[1]));
+    }
     #[test]
     fn build_date_is_read_from_version_output() {
         let line = "soloist 1.3.10.71 build 1794592912 (20261113) (g19412df6ea) (windows/x86_64)";

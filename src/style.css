@@ -2389,3 +2389,57 @@ input[type="range"]:hover {
 .sync-lines p { margin: 6px 0; color: #8a8a8a; }
 .sync-lines p.next { color: white; font-size: 18px; font-weight: 700; }
 .sync-lines small { color: #1ed760; }
+
+/* List search and sort, stats page, suggestions, skip rules. */
+.list-filter {
+  width: 190px;
+  background: #2a2a2a;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: white;
+  font-size: 13px;
+}
+.list-filter:focus { border-color: #777; outline: none; }
+.list-sort {
+  background: #2a2a2a;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px;
+  color: white;
+  font-size: 13px;
+}
+.list-empty { padding: 24px 0; }
+.muted { color: #b3b3b3; }
+.stats-page h3 { margin: 22px 0 10px; font-size: 16px; }
+.stats-page section { margin-bottom: 34px; }
+.stats-tiles { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.stats-tiles div { background: #1f1f1f; border-radius: 8px; padding: 14px 18px; min-width: 150px; }
+.stats-tiles strong { display: block; font-size: 22px; }
+.stats-tiles span { color: #b3b3b3; font-size: 13px; }
+.stats-list { display: grid; gap: 2px; }
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+button.stats-row { cursor: pointer; }
+.stats-row:hover { background: #ffffff12; }
+.stats-row .rank { width: 20px; color: #b3b3b3; text-align: right; font-size: 13px; }
+.stats-row .thumb { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
+.stats-row .text { flex: 1; min-width: 0; display: grid; }
+.stats-row .text strong, .stats-row .text small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-row small { color: #b3b3b3; font-size: 12px; }
+.suggestions { margin-top: 36px; }
+.suggestions .white-button { padding: 6px 14px; font-size: 13px; }
+.rules-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.rules-add input { width: 200px; display: inline-block; padding: 8px 10px; }
+.chip.swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.chip.swatch.selected { border-color: white; }

@@ -190,6 +190,18 @@ async fn spotify_player_stop(player: State<'_, native_player::NativePlayer>) -> 
     player.stop().await;
     Ok(())
 }
+/// Fades the built-in player's volume (0-100) over about `millis`.
+#[tauri::command]
+async fn spotify_player_fade(from: u8, to: u8, millis: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native_player::fade(from, to, millis.min(3000)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+/// Skip rules for the tray (see `background::SkipRules`); `None` turns them off.
+#[tauri::command]
+fn set_skip_rules(rules: Option<background::SkipRules>) {
+    *background::RULES.lock().unwrap() = rules;
+}
 /// Build date (`YYYYMMDD`) of the installed Soloist; it expires 90 days later.
 #[tauri::command]
 async fn spotify_player_build() -> Option<String> {
@@ -367,6 +379,8 @@ pub fn run() {
             spotify_player_status,
             spotify_player_stop,
             spotify_player_build,
+            spotify_player_fade,
+            set_skip_rules,
             lyrics_fetch,
             island_toggle,
             island_show_main,

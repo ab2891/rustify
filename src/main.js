@@ -392,42 +392,55 @@ function renderContent() {
           .slice(0, 5)
           .map((p) => ({ ...p, type: "playlist" })),
       ];
-      body = `<h1 class="home-title">${greeting}</h1><div class="quick-grid">${quick.map((p) => `<button class="quick-card" data-route="${p.type}" data-id="${h(p.id || "")}">${p.cover ? cover(p.cover) : likedCover()}<span>${h(p.title)}</span><span class="quick-play">${icon("play")}</span></button>`).join("")}</div>`;
-      if (!isSpotify() && library.recent.length)
-        body += section(
-          "Recently played",
-          `<div class="card-grid">${library.recent
-            .map((id) => trackById(id))
-            .filter(Boolean)
-            .slice(0, 6)
-            .map(albumCard)
-            .join("")}</div>`,
+      // Each part of the home page is a section the user can hide or reorder
+      // (features/home.js).
+      const sections = {
+        quick: `<div class="quick-grid">${quick.map((p) => `<button class="quick-card" data-route="${p.type}" data-id="${h(p.id || "")}">${p.cover ? cover(p.cover) : likedCover()}<span>${h(p.title)}</span><span class="quick-play">${icon("play")}</span></button>`).join("")}</div>`,
+      };
+      const recent = isSpotify()
+        ? features.stats.recentHTML()
+        : library.recent.length
+          ? `<div class="card-grid">${library.recent
+              .map((id) => trackById(id))
+              .filter(Boolean)
+              .slice(0, 6)
+              .map(albumCard)
+              .join("")}</div>`
+          : "";
+      if (recent) sections.recent = section("Recently played", recent);
+      const top = features.stats.topHTML();
+      if (top)
+        sections.top = section(
+          "Your most played",
+          top,
+          '<button class="text-button" data-action="stats">Your stats</button>',
         );
       if (playlists().length)
-        body += section(
+        sections.playlists = section(
           "Your playlists",
           `<div class="card-grid">${playlists().map(playlistCard).join("")}</div>`,
           `<button class="text-button" data-route="playlists">Show all</button>`,
         );
       if (isSpotify() && remote.albums.length)
-        body += section(
+        sections.albums = section(
           "Your albums",
           `<div class="card-grid">${remote.albums.map(albumCard).join("")}</div>`,
           '<button class="text-button" data-route="albums">Show all</button>',
         );
       if (!isSpotify())
-        body +=
-          section(
-            "Your albums",
-            `<div class="card-grid">${library.tracks
-              .filter(
-                (t, i, a) => a.findIndex((v) => v.album === t.album) === i,
-              )
-              .map(albumCard)
-              .join("")}</div>`,
-            '<button class="text-button" data-route="albums">Show all</button>',
-          ) +
-          `<p class="demo-caption">Six original ambient recordings are included. Import your music to make this library yours.</p>`;
+        sections.albums = section(
+          "Your albums",
+          `<div class="card-grid">${library.tracks
+            .filter(
+              (t, i, a) => a.findIndex((v) => v.album === t.album) === i,
+            )
+            .map(albumCard)
+            .join("")}</div>`,
+          '<button class="text-button" data-route="albums">Show all</button>',
+        );
+      body = `<h1 class="home-title">${greeting}</h1>${features.home.arrange(sections)}`;
+      if (!isSpotify())
+        body += `<p class="demo-caption">Six original ambient recordings are included. Import your music to make this library yours.</p>`;
       else if (!playlists().length)
         body += empty(
           "Your library starts here",
@@ -438,11 +451,16 @@ function renderContent() {
     }
     el.innerHTML =
       toolbar() +
-      `<div class="content-filters chips"><button class="chip selected" data-action="home">All</button><button class="chip" data-route="local">${isSpotify() ? "Saved songs" : "Local files"}</button></div><div class="content-body">${body}</div>`;
+      `<div class="content-filters chips"><button class="chip selected" data-action="home">All</button><button class="chip" data-route="local">${isSpotify() ? "Saved songs" : "Local files"}</button><button class="chip" data-action="stats">Your stats</button><span style="flex:1"></span><button class="chip" data-action="home-customize">Customize</button></div><div class="content-body">${body}</div>`;
     return;
   }
   if (route.type === "search") {
     renderSearch();
+    return;
+  }
+  if (route.type === "stats") {
+    el.innerHTML = toolbar() + features.stats.page();
+    features.stats.load().catch(handleError);
     return;
   }
   if (route.type === "playlists" || route.type === "albums") {
@@ -470,7 +488,7 @@ function renderContent() {
   const list = viewTracks();
   el.innerHTML =
     toolbar() +
-    `<div class="playlist-hero ${route.type === "liked" ? "liked-hero" : ""}">${route.type !== "liked" ? `<div class="hero-art-backdrop">${cover(info.cover)}</div>` : ""}${route.type === "liked" ? likedCover() : cover(info.cover, info.title)}<div><small>${h(info.kind)}</small><h1>${h(info.title)}</h1><p>${h(info.description || "")}<br><strong>${h(isSpotify() ? remote.profile?.display_name || "Your collection" : "Your collection")}</strong> · ${info.total ?? list.length} songs${list.length && list.length === (info.total ?? list.length) ? " · " + formatTime(list.reduce((n, t) => n + t.duration, 0)) : ""}</p></div></div><div class="content-body"><div class="playlist-actions"><button class="big-play" data-action="play-view" data-title="${h(info.title)}" aria-label="${viewIsActive() && playing ? "Pause" : "Play"} ${h(info.title)}">${icon(viewIsActive() && playing ? "pause" : "play")}</button>${shuffleControls()}${isSpotify() && route.type === "album" ? `<button class="album-save ${remote.savedAlbums.get(route.id) ? "saved" : ""}" data-action="save-album" aria-label="${remote.savedAlbums.get(route.id) ? "Remove saved album" : "Save album"}">${icon(remote.savedAlbums.get(route.id) ? "check" : "plus")}</button>` : ""}${route.type === "playlist" ? ib("more", "Playlist options", "playlist-menu") : ""}<span style="flex:1"></span>${!isSpotify() ? '<button class="text-button" data-action="import">Import music</button>' : ""}</div>${list.length ? table(list) : empty("Find your next favorite", route.type === "liked" ? "Save songs with the heart button." : "Add songs from search or your collection.", "focus-search", "Search music")}${isSpotify() && (route.type === "liked" || route.type === "local" ? remote.moreLiked : remote.viewMore) ? '<button class="white-button load-more" data-action="more-tracks">Load more songs</button>' : ""}</div>`;
+    `<div class="playlist-hero ${route.type === "liked" ? "liked-hero" : ""}">${route.type !== "liked" ? `<div class="hero-art-backdrop">${cover(info.cover)}</div>` : ""}${route.type === "liked" ? likedCover() : cover(info.cover, info.title)}<div><small>${h(info.kind)}</small><h1>${h(info.title)}</h1><p>${h(info.description || "")}<br><strong>${h(isSpotify() ? remote.profile?.display_name || "Your collection" : "Your collection")}</strong> · ${info.total ?? list.length} songs${list.length && list.length === (info.total ?? list.length) ? " · " + formatTime(list.reduce((n, t) => n + t.duration, 0)) : ""}</p></div></div><div class="content-body"><div class="playlist-actions"><button class="big-play" data-action="play-view" data-title="${h(info.title)}" aria-label="${viewIsActive() && playing ? "Pause" : "Play"} ${h(info.title)}">${icon(viewIsActive() && playing ? "pause" : "play")}</button>${shuffleControls()}${isSpotify() && route.type === "album" ? `<button class="album-save ${remote.savedAlbums.get(route.id) ? "saved" : ""}" data-action="save-album" aria-label="${remote.savedAlbums.get(route.id) ? "Remove saved album" : "Save album"}">${icon(remote.savedAlbums.get(route.id) ? "check" : "plus")}</button>` : ""}${route.type === "playlist" ? ib("more", "Playlist options", "playlist-menu") : ""}<span style="flex:1"></span><input id="list-filter" class="list-filter" type="search" placeholder="Search in this list" aria-label="Search in this list" value="${h(listFilter)}"><select id="list-sort" class="list-sort" aria-label="Sort songs">${[["default", "Original order"], ["title", "Title"], ["artist", "Artist"], ["album", "Album"], ["duration", "Length"], ...(isSpotify() && route.type !== "album" ? [["added", "Recently added"]] : [])].map(([value, label]) => `<option value="${value}" ${listSort === value ? "selected" : ""}>${label}</option>`).join("")}</select>${!isSpotify() ? '<button class="text-button" data-action="import">Import music</button>' : ""}</div>${list.length ? table(list) : listFilter.trim() ? `<p class="muted list-empty">No songs match "${h(listFilter.trim())}".</p>` : empty("Find your next favorite", route.type === "liked" ? "Save songs with the heart button." : "Add songs from search or your collection.", "focus-search", "Search music")}${isSpotify() && (route.type === "liked" || route.type === "local" ? remote.moreLiked : remote.viewMore) ? '<button class="white-button load-more" data-action="more-tracks">Load more songs</button>' : ""}${features.suggestions.html()}</div>`;
 }
 // Whether the open collection is the one playing. The play button then
 // pauses and resumes it instead of starting it again from the top.
@@ -540,7 +558,27 @@ function viewInfo() {
     cover: t?.cover,
   };
 }
+// Search and sorting inside the open song list. Reset when the view changes.
+let listFilter = "";
+let listSort = "default";
+const listChanged = () => Boolean(listFilter.trim()) || listSort !== "default";
+const SORTS = {
+  title: (a, b) => a.title.localeCompare(b.title),
+  artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
+  album: (a, b) => (a.album || "").localeCompare(b.album || "") || a.title.localeCompare(b.title),
+  duration: (a, b) => a.duration - b.duration,
+  added: (a, b) => String(collectionDate(b) || "").localeCompare(String(collectionDate(a) || "")),
+};
+/** The songs of the open view as shown: filtered and sorted. */
 function viewTracks() {
+  let list = allViewTracks();
+  if (route.type === "search") return list;
+  const words = listFilter.trim().toLowerCase();
+  if (words) list = list.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(words));
+  if (SORTS[listSort]) list = [...list].sort(SORTS[listSort]);
+  return list;
+}
+function allViewTracks() {
   if (route.type === "search") return searchData.tracks;
   if (isSpotify())
     return route.type === "liked" || route.type === "local"
@@ -719,6 +757,11 @@ function playerSnapshot() {
     artist: current?.artist || "",
     album: current?.album || "",
     cover: current?.cover || "",
+    id: current?.id || "",
+    uri: current?.uri || "",
+    artistId: current?.artistId || "",
+    explicit: Boolean(current?.explicit),
+    liked: current ? Boolean(liked(current.id)) : false,
     playing: Boolean(playing),
     elapsed,
     duration,
@@ -750,6 +793,8 @@ async function navigate(next, record = true) {
     historyIndex++;
   }
   route = next;
+  listFilter = "";
+  listSort = "default";
   clearSelection();
   document.querySelector(".content").scrollTop = 0;
   renderLibrary();
@@ -1028,11 +1073,13 @@ async function readPlayerState(silent) {
       anchorPosition();
       duration = current.duration;
       remote.deviceId = state.device?.id;
-      const volume = state.device?.volume_percent;
+      // During a fade the device volume is on its way down or up; it is not
+      // the volume the user chose.
+      const volume = features?.transitions.busy() ? null : state.device?.volume_percent;
       if (volume != null) audio.volume = volume / 100;
       // The last audible volume is kept behind a mute and restored on unmute.
       if (volume) previousVolume = volume / 100;
-      muted = volume === 0;
+      if (volume != null) muted = volume === 0;
       await checkSaved([current]);
     } else {
       current = null;
@@ -1423,7 +1470,7 @@ async function reshuffleRemaining() {
     toast(`${queue.upcoming().length} remaining songs reshuffled`);
   }
 }
-async function playTrack(id, list = viewTracks(), useContext = true) {
+async function playTrack(id, list = viewTracks(), useContext = !listChanged()) {
   const sequence = ++playSequence;
   remote.pendingSequential = null;
   remote.pendingReshuffle = false;
@@ -1534,10 +1581,14 @@ async function advance(previous = false, ended = false) {
       await seekRemote(0);
       return;
     }
-    await playerCommand(
-      "POST",
-      `/me/player/${previous ? "previous" : "next"}${deviceQuery()}`,
-    );
+    const skip = () =>
+      playerCommand(
+        "POST",
+        `/me/player/${previous ? "previous" : "next"}${deviceQuery()}`,
+      );
+    // A song that ended by itself needs no fade.
+    if (ended || !playing) await skip();
+    else await features.transitions.wrap("skip", skip);
     return;
   }
   if (previous && audio.currentTime > 3) {
@@ -1606,9 +1657,11 @@ async function togglePlay() {
     renderPlayer();
     markPlayingRows();
     try {
-      await playerCommand(
-        "PUT",
-        `/me/player/${wasPlaying ? "pause" : "play"}${deviceQuery()}`,
+      await features.transitions.wrap(wasPlaying ? "pause" : "play", () =>
+        playerCommand(
+          "PUT",
+          `/me/player/${wasPlaying ? "pause" : "play"}${deviceQuery()}`,
+        ),
       );
     } catch (error) {
       playing = wasPlaying;
@@ -1670,12 +1723,33 @@ async function toggleLike(id) {
     renderContent();
 }
 function openModal(title, body, actions = "") {
+  // Re-opening the same dialog (a setting was flicked) keeps the place: same
+  // scroll position, and focus back on the control that was used.
+  const previous = document.querySelector(".modal");
+  const same = previous?.getAttribute("aria-label") === title;
+  const scroll = same ? previous.scrollTop : 0;
+  const used = same && previous.contains(document.activeElement) ? document.activeElement : null;
+  const again = used?.dataset?.action
+    ? `[data-action="${CSS.escape(used.dataset.action)}"]${used.dataset.value != null ? `[data-value="${CSS.escape(used.dataset.value)}"]` : ""}${used.dataset.id != null ? `[data-id="${CSS.escape(used.dataset.id)}"]` : ""}`
+    : used?.id
+      ? `#${CSS.escape(used.id)}`
+      : null;
+  const returnFocus = same ? modalReturnFocus : document.activeElement;
   closeModal();
-  modalReturnFocus = document.activeElement;
+  modalReturnFocus = returnFocus;
   const container = document.createElement("div");
   container.className = "modal-backdrop";
   container.innerHTML = `<section class="modal" role="dialog" aria-modal="true" aria-label="${h(title)}"><div class="modal-head"><h2>${h(title)}</h2>${ib("close", "Close dialog", "close-modal")}</div>${body}<div class="status-message" role="alert"></div>${actions ? `<div class="modal-actions">${actions}</div>` : ""}</section>`;
   document.body.append(container);
+  if (same) {
+    const modal = container.querySelector(".modal");
+    modal.scrollTop = scroll;
+    const target = again && modal.querySelector(again);
+    // preventScroll: focusing must not move the dialog either.
+    if (target && !target.disabled) target.focus({ preventScroll: true });
+    else modal.querySelector(".modal-head button")?.focus({ preventScroll: true });
+    return;
+  }
   setTimeout(() => container.querySelector("input,button")?.focus(), 0);
 }
 function closeModal() {
@@ -1911,7 +1985,7 @@ function trackMenu(button, id) {
   }
   contextMenu(
     button,
-    `<button data-enqueue="${h(id)}">Add to queue</button><button data-add-playlist="${h(id)}">Add to playlist</button>${isSpotify() && trackById(id)?.artistId ? `<button data-route="artist" data-id="${h(trackById(id).artistId)}">Go to artist</button>` : ""}${isSpotify() && trackById(id)?.albumId ? `<button data-route="album" data-id="${h(trackById(id).albumId)}">Go to album</button>` : ""}<button data-like="${h(id)}">${liked(id) ? "Remove from" : "Add to"} Liked Songs</button><button data-action="lyrics-edit" data-id="${h(id)}">${features?.lyrics.get(trackById(id)) ? "Edit lyrics" : "Add lyrics"}</button>${route.type === "playlist" ? `<button data-remove-playlist-track="${h(id)}">Remove from this playlist</button>` : ""}`,
+    `<button data-enqueue="${h(id)}">Add to queue</button><button data-add-playlist="${h(id)}">Add to playlist</button>${isSpotify() && trackById(id)?.artistId ? `<button data-route="artist" data-id="${h(trackById(id).artistId)}">Go to artist</button>` : ""}${isSpotify() && trackById(id)?.albumId ? `<button data-route="album" data-id="${h(trackById(id).albumId)}">Go to album</button>` : ""}<button data-like="${h(id)}">${liked(id) ? "Remove from" : "Add to"} Liked Songs</button>${isSpotify() && trackById(id)?.artistId ? `<button data-action="rules-block-artist" data-id="${h(id)}">${features?.rules.blocksArtist(trackById(id).artistId) ? "Allow this artist again" : "Never play this artist"}</button>` : ""}<button data-action="lyrics-edit" data-id="${h(id)}">${features?.lyrics.get(trackById(id)) ? "Edit lyrics" : "Add lyrics"}</button>${route.type === "playlist" ? `<button data-remove-playlist-track="${h(id)}">Remove from this playlist</button>` : ""}`,
   );
 }
 async function search(more = false) {
@@ -2319,6 +2393,16 @@ const featureContext = {
   get current() { return current; },
   get playing() { return Boolean(playing); },
   get trueShuffle() { return trueShuffle; },
+  get route() { return route; },
+  get volume() { return audio.volume; },
+  cache,
+  /** Makes a song known to this session (for example one from the play log). */
+  remember: (track) => remote.tracks.set(track.id, { ...track }),
+  safeImage,
+  viewTracks,
+  addToPlaylist,
+  toggleLike,
+  renderContent,
   get features() { return features; },
   get library() { return library; },
   isSpotify,
@@ -2432,6 +2516,14 @@ document.addEventListener("input", (event) => {
     }
     if (!isSpotify()) renderSearch();
     else searchTimer = setTimeout(() => search().catch(handleError), 350);
+  } else if (event.target.id === "list-filter") {
+    listFilter = event.target.value;
+    const start = event.target.selectionStart;
+    clearSelection();
+    renderContent();
+    const input = document.querySelector("#list-filter");
+    input?.focus();
+    input?.setSelectionRange(start, start);
   } else if (event.target.id === "library-search") {
     librarySearch = event.target.value;
     const start = event.target.selectionStart;
@@ -2461,6 +2553,11 @@ document.addEventListener("change", async (event) => {
     if (event.target.id === "library-sort") {
       librarySort = event.target.value;
       renderLibrary();
+    }
+    if (event.target.id === "list-sort") {
+      listSort = event.target.value;
+      clearSelection();
+      renderContent();
     }
     if (event.target.id === "file-import") {
       await importFiles(event.target.files);
@@ -2647,7 +2744,8 @@ document.addEventListener("drop", (event) => {
     addToPlaylist(p.dataset.dropPlaylist, dragIds).catch(handleError);
   } else if (row && route.type === "playlist") {
     const to = Number(row.dataset.index);
-    if (isSpotify()) reorderRemote(dragIndex, to).catch(handleError);
+    if (listChanged()) toast("Clear the search and sorting to reorder this playlist.");
+    else if (isSpotify()) reorderRemote(dragIndex, to).catch(handleError);
     else if (to !== dragIndex) {
       const p = library.playlists.find((p) => p.id === route.id);
       p.track_ids.splice(dragIndex, 1);

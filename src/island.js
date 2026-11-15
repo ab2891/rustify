@@ -10,6 +10,7 @@ import { currentLine } from "./lyrics.js";
 const root = document.querySelector("#island");
 const panel = document.querySelector("#lyrics");
 let shownLine = -2;
+let picture = ""; // custom background picture (data URL), sent by the main window
 // Estimated lyrics can be nudged with the mouse wheel; seconds, per song.
 let nudge = 0;
 let nudgeKey = "";
@@ -26,6 +27,12 @@ function render() {
   const style = state?.style || {};
   document.documentElement.style.setProperty("--opacity", String((style.opacity ?? 100) / 100));
   document.body.classList.toggle("compact", Boolean(style.compact));
+  // Background: dark (default), the song's cover, a colour or the user's picture.
+  const background = style.background || "dark";
+  const image = background === "cover" ? state?.cover : background === "image" ? picture : "";
+  document.body.dataset.background = image || background === "color" ? background : "dark";
+  root.style.setProperty("--bg-image", image ? `url("${String(image).replace(/["\\\n]/g, "")}")` : "none");
+  root.style.setProperty("--bg-color", style.color || "#1d3557");
   renderLyrics();
   if (style.compact) {
     root.className = `island${state?.playing ? " playing" : ""}`;
@@ -38,7 +45,7 @@ function render() {
     return;
   }
   root.className = `island${state.playing ? " playing" : ""}`;
-  root.innerHTML = `${state.cover ? `<img class="cover" src="${h(state.cover)}" alt="">` : `<div class="cover"></div>`}<button class="text" data-command="show-main" title="Open Rustify"><strong>${h(state.title)}</strong><small>${h(state.artist)}</small></button><div class="controls"><button data-command="previous" aria-label="Previous track">${icon("previous")}</button><button class="play" data-command="play" aria-label="${state.playing ? "Pause" : "Play"}">${icon(state.playing ? "pause" : "play")}</button><button data-command="next" aria-label="Next track">${icon("next")}</button><button class="lyrics-toggle" data-command="lyrics" aria-label="${state.lyrics ? "Hide lyrics" : "Show lyrics"}" aria-expanded="${Boolean(state.lyrics)}" title="Lyrics">${icon(state.lyrics ? "up" : "down")}</button></div>${closeButton()}<div class="progress"><span></span></div>`;
+  root.innerHTML = `${state.cover ? `<img class="cover" src="${h(state.cover)}" alt="">` : `<div class="cover"></div>`}<button class="text" data-command="show-main" title="Open Rustify"><strong>${h(state.title)}</strong><small>${h(state.artist)}</small></button><div class="controls">${state.id ? `<button class="like${state.liked ? " on" : ""}" data-command="like" aria-label="${state.liked ? "Remove from" : "Add to"} Liked Songs" aria-pressed="${Boolean(state.liked)}">${icon(state.liked ? "check" : "heart")}</button>` : ""}<button data-command="previous" aria-label="Previous track">${icon("previous")}</button><button class="play" data-command="play" aria-label="${state.playing ? "Pause" : "Play"}">${icon(state.playing ? "pause" : "play")}</button><button data-command="next" aria-label="Next track">${icon("next")}</button><button class="lyrics-toggle" data-command="lyrics" aria-label="${state.lyrics ? "Hide lyrics" : "Show lyrics"}" aria-expanded="${Boolean(state.lyrics)}" title="Lyrics">${icon(state.lyrics ? "up" : "down")}</button></div>${closeButton()}<div class="progress"><span></span></div>`;
   tick();
 }
 
@@ -103,7 +110,7 @@ await listen("island-state", (event) => {
   const next = event.payload;
   const changed =
     !state ||
-    ["title", "artist", "cover", "playing"].some((k) => state[k] !== next[k]) ||
+    ["title", "artist", "cover", "playing", "liked", "id"].some((k) => state[k] !== next[k]) ||
     JSON.stringify(state.style) !== JSON.stringify(next.style) ||
     state.lyrics?.key !== next.lyrics?.key ||
     state.lyrics?.status !== next.lyrics?.status ||
@@ -114,6 +121,10 @@ await listen("island-state", (event) => {
   receivedAt = Date.now();
   if (changed) render();
   else tick();
+});
+await listen("island-background", (event) => {
+  picture = typeof event.payload === "string" && event.payload.startsWith("data:image/") ? event.payload : "";
+  render();
 });
 render();
 setInterval(tick, 250);

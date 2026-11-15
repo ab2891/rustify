@@ -13,7 +13,7 @@ use std::{
 use tokio::sync::Mutex;
 
 pub const REDIRECT: &str = "http://127.0.0.1:43821/callback";
-pub const SCOPES: &str = "streaming user-read-email user-read-private playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-library-read user-library-modify user-read-playback-state user-read-currently-playing user-modify-playback-state";
+pub const SCOPES: &str = "streaming user-read-email user-read-private playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-library-read user-library-modify user-read-playback-state user-read-currently-playing user-modify-playback-state user-top-read user-read-recently-played";
 #[derive(Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -415,6 +415,9 @@ pub fn allowed_url(method: &str, path: &str) -> Result<Url, String> {
             | "/me/player"
             | "/me/player/devices"
             | "/me/player/queue"
+            | "/me/player/recently-played"
+            | "/me/top/tracks"
+            | "/me/top/artists"
     ) || matches!(
         segments.as_slice(),
         ["playlists", _, "items"]

@@ -41,3 +41,40 @@ test("tapped timings round-trip through LRC", () => {
   assert.deepEqual(parseLRC(lrc), [{ time: 1.5, text: "One" }, { time: 75.25, text: "Two" }]);
   assert.equal(plainText(lrc), "One\nTwo");
 });
+
+import { commonArtists } from "../src/features/suggestions.js";
+import { ordered } from "../src/features/home.js";
+import { genreBlocked } from "../src/features/rules.js";
+import { record } from "../src/features/stats.js";
+
+test("suggestions pick the most common artists and rotate on later rounds", () => {
+  const tracks = [{ artist: "A, X" }, { artist: "A" }, { artist: "B" }, { artist: "B" }, { artist: "B" }, { artist: "C" }, { artist: "Unknown artist" }];
+  assert.deepEqual(commonArtists(tracks, 2), ["B", "A"]);
+  assert.deepEqual(commonArtists(tracks, 2, 1), ["C", "B"]);
+  assert.deepEqual(commonArtists([], 2), []);
+});
+
+test("home order keeps saved choices and appends new sections", () => {
+  assert.deepEqual(ordered(["albums", "gone", "quick"]), ["albums", "quick", "recent", "top", "playlists"]);
+  assert.deepEqual(ordered(undefined), ["quick", "recent", "top", "playlists", "albums"]);
+});
+
+test("a blocked genre word matches inside an artist's genres", () => {
+  assert.equal(genreBlocked(["Melodic Death Metal"], ["metal"]), true);
+  assert.equal(genreBlocked(["indie pop"], ["metal"]), false);
+  assert.equal(genreBlocked(undefined, ["metal"]), false);
+});
+
+test("the play log counts a play once per listen, after 30 seconds", () => {
+  const log = { songs: {}, seconds: 0, plays: 0 };
+  const session = { id: "", heard: 0, counted: false };
+  const song = { id: "a", title: "A" };
+  for (let i = 0; i < 29; i++) record(log, song, 1, session);
+  assert.equal(log.plays, 0);
+  for (let i = 0; i < 60; i++) record(log, song, 1, session);
+  assert.equal(log.plays, 1);
+  record(log, { id: "b", title: "B" }, 5, session);
+  for (let i = 0; i < 31; i++) record(log, song, 1, session);
+  assert.equal(log.songs.a.plays, 2);
+  assert.equal(log.seconds, 125);
+});

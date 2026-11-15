@@ -148,3 +148,31 @@ svg { width: 16px; height: 16px; }
 @media (prefers-reduced-motion: reduce) { .lyrics p { transition: none; } }
 /* Estimated timing: the current line is marked more softly, since it is a guess. */
 .lyrics .estimated p.now { font-weight: 400; font-size: 13px; }
+/* Backgrounds other than plain dark sit behind the content, darkened so the text stays readable. */
+.island { isolation: isolate; }
+.island::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0;
+  background: center / cover no-repeat;
+  pointer-events: none;
+}
+body[data-background="cover"] .island::before {
+  opacity: var(--opacity, 1);
+  background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55)), var(--bg-image);
+  filter: blur(14px) saturate(1.3);
+  inset: -24px;
+}
+body[data-background="image"] .island::before {
+  opacity: var(--opacity, 1);
+  background-image: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)), var(--bg-image);
+}
+body[data-background="color"] .island::before {
+  opacity: var(--opacity, 1);
+  background: linear-gradient(120deg, var(--bg-color), rgba(14, 14, 14, 0.9));
+}
+.controls .like { width: 26px; height: 26px; color: var(--muted); }
+.controls .like.on { color: var(--green); }
+.controls .like svg { width: 14px; height: 14px; }

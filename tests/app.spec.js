@@ -261,6 +261,7 @@ async function fakeSpotify(page, restore = false, options = {}) {
           if (command === "spotify_player_status") return { device_id: window.playerStarted ? "rustify-player" : null, starting: false, error: null };
           if (command === "spotify_player_stop") { window.playerStarted = false; return null; }
           if (command === "spotify_player_build") return options.soloistBuild || null;
+          if (command === "spotify_player_fade") { if (options.fadeFails) throw new Error("no channel"); return null; }
           if (command === "lyrics_fetch") return options.lyrics || null;
           if (command === "get_library") return demo;
           if (command === "spotify_restore")
@@ -452,12 +453,19 @@ async function fakeSpotify(page, restore = false, options = {}) {
                 next: offset + items.length < count ? "next" : null,
               };
             }
+            if (p.startsWith("/me/top/artists")) return { items: [{ id: "remote-artist", name: "Remote artist", images: [], genres: ["test pop"] }] };
+            if (p.startsWith("/me/top/tracks")) {
+              if (options.noStatsScope) throw new Error("Insufficient client scope.");
+              return { items: [other, track] };
+            }
+            if (p.startsWith("/me/player/recently-played")) return { items: [{ track }, { track: other }, { track }] };
             if (p.startsWith("/artists/"))
               return {
                 id: "remote-artist",
                 name: "Remote artist",
                 images: [],
                 followers: { total: 123 },
+                genres: options.genres || [],
               };
             if (p.startsWith("/search"))
               return {
@@ -467,6 +475,7 @@ async function fakeSpotify(page, restore = false, options = {}) {
                       ...track,
                       id: "outside-page",
                       uri: "spotify:track:outside-page",
+                      ...(options.searchName ? { name: options.searchName } : {}),
                     },
                   ],
                   next: null,
@@ -1441,4 +1450,166 @@ test("the page reports when it can be unloaded in the tray, and runs the command
   await page.getByRole("button", { name: "Settings and account", exact: true }).click();
   await page.getByRole("dialog").locator('[data-action="system-unload"]').click();
   await expect.poll(ready).toBe(false);
+});
+
+test("skip rules skip a blocked genre or artist and are handed to the tray", async ({ page }) => {
+  await fakeSpotify(page, true, { genres: ["Test Pop", "indie"] });
+  const nexts = () => page.evaluate(() => window.calls.filter((c) => c.args?.path?.startsWith("/me/player/next")).length);
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  // The playing artist's genres can be blocked with one click.
+  await dialog.getByRole("button", { name: "Genres of the artist playing now", exact: true }).click();
+  await dialog.locator('[data-action="rules-block-genre"][data-value="test pop"]').click();
+  await expect(dialog.getByRole("button", { name: "Remove test pop", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.calls.filter((c) => c.command === "set_skip_rules").at(-1).args.rules)).toEqual({ explicit: false, artists: [], genres: ["test pop"] });
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  // The next song that starts is by an artist in that genre: it is skipped.
+  await page.evaluate(() => window.testExternalAdvance());
+  await expect.poll(nexts, { timeout: 10000 }).toBeGreaterThan(0);
+  await expect(page.getByText(/Skipped ".*" \(blocked genre\)/)).toBeVisible();
+  // Removing the last rule turns the tray copy off again.
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove test pop", exact: true }).click();
+  expect(await page.evaluate(() => window.calls.filter((c) => c.command === "set_skip_rules").at(-1).args.rules)).toBeNull();
+  await page.getByRole("dialog").getByRole("button", { name: "Close dialog" }).click();
+  // A song's menu blocks its artist.
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await page.locator('tr[data-track="remote-track"] .song-title').click({ button: "right" });
+  await page.getByRole("button", { name: "Never play this artist", exact: true }).click();
+  expect(await page.evaluate(() => window.calls.filter((c) => c.command === "set_skip_rules").at(-1).args.rules.artists)).toEqual(["remote-artist"]);
+});
+
+test("stats page shows Spotify's top music and Rustify's own play log", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.getByRole("button", { name: "Your stats", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your stats", exact: true })).toBeVisible();
+  await expect(page.locator("#stats-remote .artist-card")).toContainText("Remote artist");
+  await expect(page.locator("#stats-remote .stats-list").first().locator(".stats-row")).toHaveCount(2);
+  // Recently played lists each song once.
+  await expect(page.locator("#stats-remote .stats-list").nth(1).locator(".stats-row")).toHaveCount(2);
+  await page.getByRole("button", { name: "All time", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path === "/me/top/tracks?time_range=long_term&limit=10"))).toBe(true);
+  await expect(page.getByText("songs played", { exact: true })).toBeVisible();
+  // Clicking a top song plays it.
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.locator("#stats-remote .stats-list").first().locator(".stats-row").first().click();
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.args?.path?.startsWith("/me/player/play"))?.args.body.uris)).toEqual(["spotify:track:other-track", "spotify:track:remote-track"]);
+});
+
+test("stats explains when the saved sign-in lacks the permission", async ({ page }) => {
+  await fakeSpotify(page, true, { noStatsScope: true });
+  await page.getByRole("button", { name: "Your stats", exact: true }).click();
+  await expect(page.locator("#stats-remote")).toContainText("disconnect in Settings and sign in again");
+});
+
+test("home sections can be hidden and reordered, and the choice is kept", async ({ page }) => {
+  await fakeSpotify(page, true);
+  // "Recently played" appears once something has played; look at the two fixed sections.
+  const headings = async () => (await page.locator(".content-body section h2").allTextContents()).filter((t) => t.startsWith("Your "));
+  await expect.poll(headings).toEqual(["Your playlists", "Your albums"]);
+  await page.getByRole("button", { name: "Customize", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Customize home" });
+  await dialog.getByRole("button", { name: "Move Your albums up", exact: true }).click();
+  await expect.poll(headings).toEqual(["Your albums", "Your playlists"]);
+  await page.getByRole("dialog", { name: "Customize home" }).getByRole("button", { name: "Show Shortcuts", exact: true }).click();
+  await expect(page.locator(".quick-grid")).toHaveCount(0);
+  await page.reload();
+  await expect.poll(headings).toEqual(["Your albums", "Your playlists"]);
+  await expect(page.locator(".quick-grid")).toHaveCount(0);
+});
+
+test("a song list can be searched and sorted, and plays as shown", async ({ page }) => {
+  await fakeSpotify(page, true, { large: true });
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await expect(page.locator('tr[data-track="pool-3"]')).toBeVisible();
+  await page.locator("#list-filter").fill("Pool song 1");
+  // "Pool song 1" and "Pool song 10" to "19" among the 50 loaded songs.
+  await expect(page.locator("tbody tr")).toHaveCount(11);
+  await expect(page.locator("#list-filter")).toBeFocused();
+  await page.locator("#list-sort").selectOption("title");
+  await expect(page.locator("tbody tr").first()).toHaveAttribute("data-track", "pool-1");
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.locator('tr[data-track="pool-12"] .song-title').dblclick();
+  const body = await page.evaluate(async () => {
+    for (let i = 0; i < 40; i++) {
+      const call = window.calls.find((c) => c.args?.path?.startsWith("/me/player/play"));
+      if (call) return call.args.body;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  });
+  expect(body.uris).toHaveLength(11);
+  expect(body.offset).toEqual({ position: 3 });
+  await page.locator("#list-filter").fill("zzz");
+  await expect(page.getByText('No songs match "zzz".')).toBeVisible();
+});
+
+test("playlist suggestions offer songs by the playlist's artists that are not in it yet", async ({ page }) => {
+  await fakeSpotify(page, true, { searchName: "A different song" });
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.getByRole("button", { name: "Suggest songs for this playlist", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.args?.path?.startsWith("/search"))?.args.path)).toContain(encodeURIComponent('artist:"Remote artist"'));
+  await expect(page.locator("#suggestions .stats-row")).toHaveCount(1);
+  await page.locator('#suggestions [data-action="suggest-add"]').click();
+  await expect.poll(() => page.evaluate(() => window.calls.find((c) => c.args?.method === "POST" && c.args.path === "/playlists/remote-playlist/items")?.args.body)).toEqual({ uris: ["spotify:track:outside-page"] });
+});
+
+test("fades wrap pause and resume on Rustify's player and always restore the volume", async ({ page }) => {
+  await fakeSpotify(page, true, { noDevices: true });
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.selectedDevice)).toBe("rustify-player");
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await page.getByRole("dialog").locator('[data-action="transition-fade"][data-value="300"]').click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const steps = () => page.evaluate(() => window.calls.filter((c) => c.command === "spotify_player_fade" || c.args?.path?.startsWith("/me/player/pause")).map((c) => (c.command === "spotify_player_fade" ? `${c.args.from}>${c.args.to}@${c.args.millis}` : "pause")));
+  // Down over 300 ms, pause, then straight back up while paused.
+  await expect.poll(async () => (await steps()).length).toBe(3);
+  const [down, pause, up] = await steps();
+  const level = down.split(">")[0];
+  expect(Number(level)).toBeGreaterThan(4);
+  expect([down, pause, up]).toEqual([`${level}>0@300`, "pause", `0>${level}@0`]);
+});
+
+test("island gets its background, picture and like button state", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.getByRole("button", { name: "Toggle floating island", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.eventHandlers?.["island-ready"]))).toBe(true);
+  await page.evaluate(() => window.fireEvent("island-ready"));
+  const style = () => page.evaluate(() => window.emitted.filter((e) => e.event === "island-state").at(-1)?.payload.style);
+  await expect.poll(style).toMatchObject({ background: "dark" });
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  await page.getByRole("dialog").locator('[data-action="island-background"][data-value="cover"]').click();
+  await expect.poll(style).toMatchObject({ background: "cover" });
+  await page.getByRole("dialog").locator('[data-action="island-background"][data-value="color"]').click();
+  await page.getByRole("dialog").locator('[data-action="island-color"][data-value="#2d6a4f"]').click();
+  await expect.poll(style).toMatchObject({ background: "color", color: "#2d6a4f" });
+  // The island's heart likes the playing song.
+  await page.evaluate(() => (window.calls.length = 0));
+  await page.evaluate(() => window.fireEvent("island-command", "like"));
+  await expect.poll(() => page.evaluate(() => window.calls.some((c) => c.args?.path?.startsWith("/me/library")))).toBe(true);
+});
+
+test("a suggestion that is already in the playlist under another id is left out", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.locator('.library-item[data-id="remote-playlist"]').click();
+  await page.getByRole("button", { name: "Suggest songs for this playlist", exact: true }).click();
+  await expect(page.locator("#suggestions")).toContainText("Nothing new found");
+});
+
+test("flicking a setting keeps the Settings dialog where it was scrolled", async ({ page }) => {
+  await fakeSpotify(page, true);
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await page.getByRole("button", { name: "Settings and account", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const toggle = dialog.locator('[data-action="rules-explicit"]');
+  await toggle.scrollIntoViewIfNeeded();
+  const before = await dialog.evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(100);
+  await toggle.click();
+  await expect(page.getByRole("dialog", { name: "Settings" }).locator('[data-action="rules-explicit"]')).toHaveAttribute("aria-pressed", "true");
+  expect(await page.getByRole("dialog", { name: "Settings" }).evaluate((el) => el.scrollTop)).toBe(before);
+  await expect(page.getByRole("dialog", { name: "Settings" }).locator('[data-action="rules-explicit"]')).toBeFocused();
 });
