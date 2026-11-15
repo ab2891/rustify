@@ -135,7 +135,7 @@ Features can also add a Settings section with `settings: () => html`, run code o
 - `src/features/home.js`: home page layout
 - `src/features/suggestions.js`: playlist suggestions
 
- The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
+The registry is covered by `tests/features.test.mjs`. Duplicate action names fail at startup.
 
 **Rust.** Each concern is its own module, listed in `src-tauri/src/lib.rs`: `library`, `spotify`, `credentials`, `shuffle`, `native_player`, and `desktop`. `desktop` holds the Tauri commands. To add a native capability:
 
@@ -192,7 +192,7 @@ Reshuffle remaining preserves the current track and excludes played tracks. Repe
 
 Remote playback submits the complete URI list with an explicit position-zero offset and disables native Spotify shuffle. It confirms the current recording and up to 20 queued recordings before reporting success. Regional substitutions are accepted only with matching Spotify ISRC metadata, never a name comparison. A failed confirmation attempts to pause that request's device. The API exposes only a queue prefix: this verifies startup, not uninterrupted playback of the entire collection. External device/context changes invalidate the tracked plan; reconnecting mid-plan does not reconstruct previous listening history.
 
-Saved albums now have their own library view and save/remove actions. Library and Now Playing panels support mouse and keyboard resizing with persisted widths. See the [current media and verification record](../../docs/design/reviews/rustify-shuffle-2026-11-13/README.md) and [feature coverage](FEATURES.md).
+Saved albums now have their own library view and save/remove actions. Library and Now Playing panels support mouse and keyboard resizing with persisted widths. See [feature coverage](FEATURES.md).
 
 
 ## Windows build from WSL
@@ -206,7 +206,7 @@ cargo xwin build --release --target x86_64-pc-windows-msvc --features desktop,cu
 # -> target/x86_64-pc-windows-msvc/release/spotify-rust.exe (rename to Rustify.exe)
 ```
 
-Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 22/22, Playwright 37/37 and Rust 17/17 passed. The island was checked on Windows through UI Automation: it opened top-center showing the current Spotify track, closed with its own button, and reopened at the position it was moved to.
+Soloist verification (2026-11-14): pairing completed, then a track played on the Rustify device through the Web API with no Spotify app or browser open. The new Windows build was driven through UI Automation: Devices → Play on this computer started a windowless Soloist and showed "Listening on Rustify". Closing Rustify also stopped Soloist. Unit tests 22/22, Playwright 37/37 and Rust 17/17 passed at that point (as of 2026-11-15: unit 30, Playwright 58, Rust 22). The island was checked on Windows through UI Automation: it opened top-center showing the current Spotify track, closed with its own button, and reopened at the position it was moved to.
 
 Background features were checked on Windows on 2026-11-14:
 
